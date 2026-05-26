@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>graph-utils playground</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; height: 100%; background: #0c0f14; color: #ddd;
+        font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+      #app { padding: 16px; }
+      .tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+      .tab { padding: 6px 12px; background: #1a2030; border: 1px solid #2a3145;
+        border-radius: 6px; cursor: pointer; color: #ddd; font: inherit; }
+      .tab.active { background: #2a3145; }
+      .demo { width: 100%; height: calc(100vh - 80px); }
+      canvas { display: block; width: 100%; height: 100%; }
+      .pane { width: 100%; border-bottom: 1px solid #2a3145; }
+      .pane:last-child { border: 0; }
+      h2 { font-size: 13px; margin: 0 0 6px; color: #889; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="./src/main.tsx"></script>
+  </body>
+</html>

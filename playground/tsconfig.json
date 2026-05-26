@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@rw3iss/graph-utils": ["../src/index.ts"],
+      "@rw3iss/graph-utils/core": ["../src/core/index.ts"],
+      "@rw3iss/graph-utils/chart": ["../src/chart/index.ts"],
+      "@rw3iss/graph-utils/adapters": ["../src/adapters/index.ts"],
+      "@rw3iss/graph-utils/overlays": ["../src/overlays/index.ts"]
+    }
+  },
+  "include": ["src/**/*", "../src/**/*"]
+}
