@@ -1,36 +1,28 @@
 {
-    "compilerOptions": {
-        "baseUrl": "./src",
-        "outDir": "./build/",       // path to output directory
-        "sourceMap": true,          // allow sourcemap support
-        "strictNullChecks": true,   // enable strict null checks as a best practice
-        "module": "commonjs",       // specifiy module code generation
-        "target": "ES2017",         // specify ECMAScript target version
-        "jsx": "react",             // use typescript to transpile jsx to js
-        "jsxFactory": "h",
-        "allowJs": true,            // allow a partial TypeScript and JavaScript codebase  
-        "noImplicitThis": true,
-        "noImplicitReturns": false,
-
-        // Not sure if either of these are necessary:   
-        "experimentalDecorators": true,
-        "forceConsistentCasingInFileNames": true,
-
-        "paths": {
-            "app/*":        ["./*"],
-            "components/*": ["./components/*"],
-            "config/*":     ["./config/*"],
-            "data/*":       ["./data/*"],
-            "styles/*":     ["./styles/*"],
-            "utils/*":      ["./lib/utils/*"]
-        }
-    },
-    "include": [
-        "src/*"
-    ],
-    "exclude": [
-        "../node_modules/**/*",
-        "./build/*"
-    ]
-
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "noImplicitThis": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "declaration": true,
+    "declarationMap": false,
+    "sourceMap": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "tests", "playground"]
 }

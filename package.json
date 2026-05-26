@@ -1,38 +1,77 @@
 {
-    "name": "graph-client",
-    "version": "1.0.0",
-    "author": "Ryan Weiss (rw3iss@gmail.com)",
-    "license": "ISC",
-    "description": "",
-    "main": "build/app.js",
-    "scripts": {
-        "setup": "sudo npm install -g browser-sync nodemon && npm install",
-        "dev": "concurrently --kill-others \"npm run start-build-watcher\" \"npm run start-browser-sync\"",
-        "start-build-watcher": "nodemon --watch './src/**/*' -e ts,tsx,js,jsx,scss,html --exec \"npm run build\"",
-        "start-browser-sync": "node scripts/hot-launch",
-        "build": "node scripts/build",
-        "serve": "serve -l 4500 build"
+  "name": "@rw3iss/graph-utils",
+  "version": "0.1.0",
+  "description": "Modular vanilla-TypeScript canvas drawing toolkit: scales, viewports, layers, and reusable overlays that work on a bare canvas or on top of a TradingView chart.",
+  "author": "Ryan Weiss <rw3iss@gmail.com>",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
     },
-    "sideEffects": false,
-    "dependencies": {
-        "history": "^5.0.0",
-        "isomorphic-fetch": "^3.0.0",
-        "preact": "^10.5.10",
-        "preact-router": "^3.2.1"
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js",
+      "require": "./dist/core/index.cjs"
     },
-    "devDependencies": {
-        "@types/node": "^14.14.10",
-        "@typescript-eslint/eslint-plugin": "^4.15.0",
-        "@typescript-eslint/parser": "^4.15.0",
-        "browser-sync": "^2.26.13",
-        "concurrently": "^5.3.0",
-        "esbuild": "^0.8.16",
-        "eslint": "^7.20.0",
-        "fetch-mock": "^9.11.0",
-        "jsdom": "16.4.0",
-        "jsdom-global": "3.0.2",
-        "node-sass": "^5.0.0",
-        "node-sass-alias-importer": "^1.0.0",
-        "typescript": "^4.1.4"
+    "./chart": {
+      "types": "./dist/chart/index.d.ts",
+      "import": "./dist/chart/index.js",
+      "require": "./dist/chart/index.cjs"
+    },
+    "./adapters": {
+      "types": "./dist/adapters/index.d.ts",
+      "import": "./dist/adapters/index.js",
+      "require": "./dist/adapters/index.cjs"
+    },
+    "./overlays": {
+      "types": "./dist/overlays/index.d.ts",
+      "import": "./dist/overlays/index.js",
+      "require": "./dist/overlays/index.cjs"
     }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint 'src/**/*.ts'",
+    "playground": "pnpm --filter graph-utils-playground dev"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.57.0",
+    "tsup": "^8.0.2",
+    "typescript": "^5.4.5",
+    "vitest": "^1.5.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rw3iss/graph-utils.git"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "canvas",
+    "chart",
+    "drawing",
+    "visualization",
+    "trading",
+    "overlay",
+    "graph"
+  ]
 }
