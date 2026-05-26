@@ -2,11 +2,13 @@ import { useState } from 'preact/hooks';
 import { LineDemo } from './demos/LineDemo.js';
 import { CandleDemo } from './demos/CandleDemo.js';
 import { MultiPaneDemo } from './demos/MultiPaneDemo.js';
+import { TradingViewDemo } from './demos/TradingViewDemo.js';
 
 const DEMOS = [
   { id: 'line', label: 'Line chart', Component: LineDemo },
   { id: 'candle', label: 'Candle + overlays', Component: CandleDemo },
   { id: 'multipane', label: 'Multi-pane (strategy debugger)', Component: MultiPaneDemo },
+  { id: 'tradingview', label: 'TradingView + overlays', Component: TradingViewDemo },
 ] as const;
 
 export function App() {

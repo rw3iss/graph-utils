@@ -6,10 +6,10 @@
  * "RSI" indicator. Both gain SignalArrows from the same data.
  */
 import { useEffect, useRef } from 'preact/hooks';
-import { Chart, Layer } from '@rw3iss/graph-utils/chart';
-import { Viewport, type CanvasContext } from '@rw3iss/graph-utils/core';
+import { Chart, Layer, shareXAxis } from '@rw3iss/graph-utils/chart';
+import { type CanvasContext } from '@rw3iss/graph-utils/core';
 import { VanillaChartAdapter } from '@rw3iss/graph-utils/adapters';
-import { SignalArrows, OrderMarkers } from '@rw3iss/graph-utils/overlays';
+import { SignalArrows, OrderMarkers, ThresholdBand } from '@rw3iss/graph-utils/overlays';
 
 class SeriesLayer extends Layer {
   constructor(
@@ -47,13 +47,6 @@ export function MultiPaneDemo() {
     const xMin = price[0]!.x;
     const xMax = price[N - 1]!.x;
 
-    // Shared viewport for X. Each chart has its own Y viewport internally, but
-    // since Chart owns its viewport, we sync X manually on change.
-    const shared = new Viewport({
-      xDomain: [xMin, xMax],
-      yDomain: [0, 1],
-    });
-
     const top = new Chart(topRef.current, {
       xDomain: [xMin, xMax],
       yDomain: [Math.min(...price.map((d) => d.y)) - 2, Math.max(...price.map((d) => d.y)) + 2],
@@ -84,23 +77,26 @@ export function MultiPaneDemo() {
       { ts: price[122]!.x, side: 'sell', price: price[122]!.y, qty: 100, label: '100' },
     ]);
 
-    // Sync X on any pan/zoom in either pane.
-    let syncing = false;
-    const syncFrom = (src: Chart, dst: Chart) => () => {
-      if (syncing) return;
-      syncing = true;
-      dst.viewport.setXDomain(src.viewport.xDomain);
-      syncing = false;
-    };
-    const unsubTop = top.viewport.bus.on('change', syncFrom(top, bottom));
-    const unsubBot = bottom.viewport.bus.on('change', syncFrom(bottom, top));
+    // RSI overbought/oversold band on the bottom pane.
+    const botAdapter = new VanillaChartAdapter(bottom);
+    const overbought = new ThresholdBand(botAdapter, {
+      id: 'ob',
+      fill: 'rgba(239,68,68,0.10)',
+    });
+    overbought.setData({ yMin: 70, yMax: 100, label: 'overbought' });
+    const oversold = new ThresholdBand(botAdapter, {
+      id: 'os',
+      fill: 'rgba(34,197,94,0.10)',
+    });
+    oversold.setData({ yMin: 0, yMax: 30, label: 'oversold' });
+
+    // Sync X on pan/zoom across both panes with the helper.
+    const detachShare = shareXAxis([top.viewport, bottom.viewport]);
 
     return () => {
-      unsubTop();
-      unsubBot();
+      detachShare();
       top.destroy();
       bottom.destroy();
-      shared.bus.clear();
     };
   }, []);
 
