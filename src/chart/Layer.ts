@@ -71,12 +71,12 @@ export class GridLayer extends Layer {
     for (const tx of xs.ticks(this.tickCount.x)) {
       const x = xs.scale(tx);
       if (x < b.left || x > b.right) continue;
-      ctx.line(x, b.top, x, b.bottom, this.color, this.lineWidth);
+      ctx.line(x, b.top, x, b.bottom, { stroke: this.color, lineWidth: this.lineWidth });
     }
     for (const ty of ys.ticks(this.tickCount.y)) {
       const y = ys.scale(ty);
       if (y < b.top || y > b.bottom) continue;
-      ctx.line(b.left, y, b.right, y, this.color, this.lineWidth);
+      ctx.line(b.left, y, b.right, y, { stroke: this.color, lineWidth: this.lineWidth });
     }
   }
 }
@@ -109,12 +109,13 @@ export class AxisLayer extends Layer {
   draw(ctx: CanvasContext, _vp: Viewport): void {
     const b = this.bounds();
     const s = this.scale();
+    const stroke = { stroke: this.color, lineWidth: 1 };
     if (this.side === 'bottom') {
-      ctx.line(b.left, b.bottom, b.right, b.bottom, this.color, 1);
+      ctx.line(b.left, b.bottom, b.right, b.bottom, stroke);
       for (const t of s.ticks(this.tickCount)) {
         const x = s.scale(t);
         if (x < b.left || x > b.right) continue;
-        ctx.line(x, b.bottom, x, b.bottom + 4, this.color, 1);
+        ctx.line(x, b.bottom, x, b.bottom + 4, stroke);
         ctx.text(this.formatter(t), x, b.bottom + 6, {
           font: this.font,
           color: this.color,
@@ -123,11 +124,11 @@ export class AxisLayer extends Layer {
         });
       }
     } else {
-      ctx.line(b.left, b.top, b.left, b.bottom, this.color, 1);
+      ctx.line(b.left, b.top, b.left, b.bottom, stroke);
       for (const t of s.ticks(this.tickCount)) {
         const y = s.scale(t);
         if (y < b.top || y > b.bottom) continue;
-        ctx.line(b.left - 4, y, b.left, y, this.color, 1);
+        ctx.line(b.left - 4, y, b.left, y, stroke);
         ctx.text(this.formatter(t), b.left - 6, y, {
           font: this.font,
           color: this.color,

@@ -24,7 +24,7 @@ class SeriesLayer extends Layer {
       x: this.chart.xScale.scale(p.x),
       y: this.chart.yScale.scale(p.y),
     }));
-    ctx.polyline(pts, this.color, 1.5);
+    ctx.polyline(pts, { stroke: this.color, lineWidth: 1.5 });
   }
 }
 

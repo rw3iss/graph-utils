@@ -19,7 +19,7 @@ class LineLayer extends Layer {
       x: this.chart.xScale.scale(p.x),
       y: this.chart.yScale.scale(p.y),
     }));
-    ctx.polyline(pts, '#4ade80', 2);
+    ctx.polyline(pts, { stroke: '#4ade80', lineWidth: 2 });
     for (const p of pts) ctx.circle(p.x, p.y, 2.5, { fill: '#4ade80' });
   }
 }

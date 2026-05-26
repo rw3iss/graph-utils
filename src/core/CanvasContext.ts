@@ -8,8 +8,12 @@
  *   ctx.scale(DPR, DPR) at the top of every draw cycle means callers
  *   work entirely in CSS pixels.
  * - `resize()` reconciles the backing buffer with the current CSS size;
- *   callers (typically Chart) should invoke it from a ResizeObserver.
+ *   callers (typically Chart / TradingViewOverlayAdapter) invoke it from
+ *   a ResizeObserver.
  * - All drawing helpers are conveniences that delegate to primitives.ts.
+ * - Every visible-mark helper accepts a single `DrawStyle` options object —
+ *   geometry stays positional. See `primitives.ts → DrawStyle` for the
+ *   unified shape.
  */
 import {
   clearRect,
@@ -21,6 +25,7 @@ import {
   drawText,
   createLinearGradient,
   type Point,
+  type DrawStyle,
 } from './primitives.js';
 
 export interface CanvasContextOptions {
@@ -33,7 +38,10 @@ export interface TextStyle {
   color?: string;
   align?: CanvasTextAlign;
   baseline?: CanvasTextBaseline;
+  /** Rotation in degrees, applied around the anchor (x, y). */
   angle?: number;
+  /** Optional alpha (0..1). */
+  alpha?: number;
 }
 
 export class CanvasContext {
@@ -102,40 +110,30 @@ export class CanvasContext {
   }
 
   // ---- thin delegates over primitives ----------------------------------
+  // Uniform shape: positional geometry, one DrawStyle options bag.
 
   clear(): void {
     clearRect(this.ctx, 0, 0, this._cssWidth, this._cssHeight);
   }
 
-  line(x1: number, y1: number, x2: number, y2: number, color = '#000', width = 1): void {
-    drawLine(this.ctx, x1, y1, x2, y2, color, width);
+  line(x1: number, y1: number, x2: number, y2: number, opts: DrawStyle = {}): void {
+    drawLine(this.ctx, x1, y1, x2, y2, opts);
   }
 
-  rect(
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-    options: { fill?: string | CanvasGradient; stroke?: string; lineWidth?: number } = {},
-  ): void {
-    drawRect(this.ctx, x, y, w, h, options);
+  rect(x: number, y: number, w: number, h: number, opts: DrawStyle = {}): void {
+    drawRect(this.ctx, x, y, w, h, opts);
   }
 
-  circle(
-    x: number,
-    y: number,
-    r: number,
-    options: { fill?: string | CanvasGradient; stroke?: string; lineWidth?: number } = {},
-  ): void {
-    drawCircle(this.ctx, x, y, r, options);
+  circle(x: number, y: number, r: number, opts: DrawStyle = {}): void {
+    drawCircle(this.ctx, x, y, r, opts);
   }
 
-  polyline(points: Point[], color = '#000', width = 1): void {
-    drawPolyline(this.ctx, points, color, width);
+  polyline(points: Point[], opts: DrawStyle = {}): void {
+    drawPolyline(this.ctx, points, opts);
   }
 
-  path(fn: (ctx: CanvasRenderingContext2D) => void, options: { fill?: string; stroke?: string; lineWidth?: number } = {}): void {
-    drawPath(this.ctx, fn, options);
+  path(fn: (ctx: CanvasRenderingContext2D) => void, opts: DrawStyle = {}): void {
+    drawPath(this.ctx, fn, opts);
   }
 
   text(text: string, x: number, y: number, style: TextStyle = {}): void {

@@ -22,7 +22,7 @@ export {
   drawText,
   createLinearGradient,
 } from './primitives.js';
-export type { Point, FillStroke, TextOptions } from './primitives.js';
+export type { Point, DrawStyle, FillStroke, TextOptions } from './primitives.js';
 
 export {
   LinearScale,

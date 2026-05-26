@@ -38,7 +38,7 @@ class CandleLayer extends Layer {
       const yL = yScale.scale(k.l);
       const up = k.c >= k.o;
       const color = up ? '#22c55e' : '#ef4444';
-      ctx.line(x, yH, x, yL, color, 1);
+      ctx.line(x, yH, x, yL, { stroke: color, lineWidth: 1 });
       const top = Math.min(yO, yC);
       const h = Math.abs(yC - yO) || 1;
       ctx.rect(x - w / 2, top, w, h, { fill: color });
