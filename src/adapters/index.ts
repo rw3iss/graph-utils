@@ -6,13 +6,19 @@
  *                               (getCanvas / getViewport / addLayer / invalidate /
  *                                toPixel / toData)
  *   - VanillaChartAdapter:      wraps our own Chart; full implementation
- *   - TradingViewOverlayAdapter: STUB for v0.1; methods throw with a clear
- *                                "not implemented in v0.1.0" message.
- *                                Real impl in v0.2.
+ *   - TradingViewOverlayAdapter: mirrors a TradingView `lightweight-charts`
+ *                                chart by overlaying a sibling canvas.
+ *                                Peer-dep: lightweight-charts >= 5.0.0.
  */
 export type { Adapter } from './Adapter.js';
 export { VanillaChartAdapter } from './VanillaChartAdapter.js';
 export {
   TradingViewOverlayAdapter,
   type TradingViewOverlayAdapterOptions,
+  type TradingViewChart,
+  type TradingViewSeries,
+  type TradingViewTimeScale,
+  type TradingViewTime,
+  type TradingViewTimeRange,
+  type TradingViewLogicalRange,
 } from './TradingViewOverlayAdapter.js';

@@ -1,6 +1,6 @@
 {
   "name": "@rw3iss/graph-utils",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Modular vanilla-TypeScript canvas drawing toolkit: scales, viewports, layers, and reusable overlays that work on a bare canvas or on top of a TradingView chart.",
   "author": "Ryan Weiss <rw3iss@gmail.com>",
   "license": "MIT",
@@ -55,9 +55,19 @@
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
     "eslint": "^8.57.0",
+    "happy-dom": "^20.9.0",
+    "lightweight-charts": "^5.0.0",
     "tsup": "^8.0.2",
     "typescript": "^5.4.5",
     "vitest": "^1.5.0"
+  },
+  "peerDependencies": {
+    "lightweight-charts": ">=5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "lightweight-charts": {
+      "optional": true
+    }
   },
   "repository": {
     "type": "git",

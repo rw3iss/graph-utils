@@ -1,79 +1,382 @@
 /**
- * TradingViewOverlayAdapter — STUB for v0.1.0.
+ * TradingViewOverlayAdapter
  *
- * The shape is here so overlay authors can write to a stable Adapter
- * interface, but the actual TradingView wiring (subscribing to the chart's
- * timeScale + priceScale, syncing a transparent canvas above the pane,
- * forwarding DPR resize) needs API exploration against real TV objects
- * and lands in v0.2. See README → Roadmap.
+ * Mirrors a TradingView `lightweight-charts` chart by laying a sibling
+ * `<canvas>` absolute-positioned over the chart's element. Overlays paint
+ * onto our canvas using the same Adapter contract as the vanilla path —
+ * meaning the same overlay code runs on either host without modification.
  *
- * Calling any method throws so an integrator using the stub by mistake
- * gets a loud failure rather than silent no-ops.
+ * Design notes:
+ *   - We never paint onto TV's own canvases. TV owns its layers; we sit
+ *     above them with our own.
+ *   - Coordinate mapping delegates to `timeScale.timeToCoordinate` and
+ *     `series.priceToCoordinate`. Both return `null` for values outside
+ *     the visible range; overlays that hit a null skip that point.
+ *   - The adapter exposes `Scale`-shaped wrappers (`TradingViewTimeScale`
+ *     / `TradingViewPriceScale`) so overlay code that uses
+ *     `xScale.scale(v)` / `yScale.scale(v)` works unchanged.
+ *   - Resync triggers: TV `subscribeVisibleLogicalRangeChange` (zoom/pan),
+ *     `subscribeCrosshairMove` (also fires on hover so it catches steady-state
+ *     mouse-driven layout shifts), a ResizeObserver on the chart element,
+ *     and explicit `invalidate()` calls from consumers.
  *
- * Real impl outline (v0.2):
- *   - Accept the IChartApi + ISeriesApi from `lightweight-charts`
- *   - Overlay a transparent <canvas> on top of the pane element (same DPR)
- *   - On every TV `timeScale().subscribeVisibleLogicalRangeChange`, sync
- *     our Viewport.xDomain
- *   - For Y, expose a `priceToCoordinate`-based projection via toPixel
- *   - Forward pointer events from the overlay canvas through TV's pane
+ * Peer dependency: `lightweight-charts` >=5.0.0. We do not import it at
+ * runtime — only the types — so a consumer that omits it does not pay any
+ * bundle cost.
  */
-// reason: stub — types are scaffolding; real types in v0.2 will come from `lightweight-charts`.
+// reason: we keep TV types loose to avoid a hard dep on `lightweight-charts`
+// in `src/`. Consumers bring their own version via peerDependency.
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { CanvasContext } from '../core/CanvasContext.js';
+import { Viewport } from '../core/Viewport.js';
+import type { Domain, Range, Scale } from '../core/Scale.js';
 import type { Layer } from '../chart/Layer.js';
-import type { Viewport } from '../core/Viewport.js';
 import type { Adapter } from './Adapter.js';
 
-export interface TradingViewOverlayAdapterOptions {
-  /** Lightweight-charts IChartApi. Typed loosely until v0.2. */
-  // reason: stub — see file header.
-  chart: any;
-  /** Lightweight-charts ISeriesApi. */
-  // reason: stub — see file header.
-  series: any;
-  /** HTMLElement wrapping the pane (we mount our overlay canvas inside). */
-  container: HTMLElement;
+// ----- TV type surface we depend on, copied locally to avoid the import -----
+// (Consumers using TS will get full inference from their own import; we just
+// need enough to call the methods we use.)
+
+export type TradingViewTime = string | number | { year: number; month: number; day: number };
+
+export interface TradingViewTimeRange {
+  from: TradingViewTime;
+  to: TradingViewTime;
 }
 
+export interface TradingViewLogicalRange {
+  from: number;
+  to: number;
+}
+
+export interface TradingViewTimeScale {
+  timeToCoordinate(time: TradingViewTime): number | null;
+  coordinateToTime(coord: number): TradingViewTime | null;
+  getVisibleRange(): TradingViewTimeRange | null;
+  getVisibleLogicalRange(): TradingViewLogicalRange | null;
+  subscribeVisibleLogicalRangeChange(handler: (r: TradingViewLogicalRange | null) => void): void;
+  unsubscribeVisibleLogicalRangeChange(handler: (r: TradingViewLogicalRange | null) => void): void;
+  subscribeVisibleTimeRangeChange?(handler: (r: TradingViewTimeRange | null) => void): void;
+  unsubscribeVisibleTimeRangeChange?(handler: (r: TradingViewTimeRange | null) => void): void;
+}
+
+export interface TradingViewSeries {
+  priceToCoordinate(price: number): number | null;
+  coordinateToPrice(coord: number): number | null;
+}
+
+export interface TradingViewChart {
+  timeScale(): TradingViewTimeScale;
+  chartElement(): HTMLElement;
+  subscribeCrosshairMove?(handler: (param: any) => void): void;
+  unsubscribeCrosshairMove?(handler: (param: any) => void): void;
+}
+
+// ---------------------------------------------------------------------------
+
+export interface TradingViewOverlayAdapterOptions {
+  /** The TV chart whose plot area we'll overlay. */
+  chart: TradingViewChart;
+  /** A series whose price scale we should mirror. Required: TV's
+   *  priceToCoordinate lives on a series, not on the chart. */
+  priceSeries: TradingViewSeries;
+  /** Container the overlay canvas attaches to. Defaults to the parent of
+   *  the TV chart element. */
+  container?: HTMLElement;
+  /** z-index for the overlay canvas. Default 10 (above TV's layers). */
+  zIndex?: number;
+  /**
+   * Unit for the X data coordinate passed to `toPixel` and to
+   * `xScale.scale`. TV's native `UTCTimestamp` is **seconds**; many app
+   * data sources use **milliseconds**. Default `'seconds'`.
+   */
+  timeUnit?: 'seconds' | 'milliseconds';
+  /** Override DPR (mostly for tests). */
+  dpr?: number;
+}
+
+// ---------------------------------------------------------------------------
+
+/**
+ * TradingViewTimeScaleAdapter — wraps the TV time scale as our `Scale`.
+ *
+ * `scale(v)` calls `timeToCoordinate`. `invert(px)` calls
+ * `coordinateToTime`. `setDomain`/`setRange` are no-ops because the
+ * domain/range are owned by TV; the methods exist so the Scale interface
+ * is satisfied for code that calls them defensively.
+ *
+ * `ticks(n)` queries TV's visible time range and emits `n` evenly spaced
+ * stops; if no visible range is reported (chart not yet sized), returns
+ * an empty array.
+ */
+class TradingViewTimeScaleAdapter implements Scale {
+  private ts: TradingViewTimeScale;
+  private toTime: (v: number) => TradingViewTime;
+  private fromTime: (t: TradingViewTime) => number;
+
+  constructor(ts: TradingViewTimeScale, unit: 'seconds' | 'milliseconds') {
+    this.ts = ts;
+    if (unit === 'milliseconds') {
+      this.toTime = (v) => Math.floor(v / 1000) as unknown as TradingViewTime;
+      this.fromTime = (t) => (typeof t === 'number' ? t * 1000 : Number(t));
+    } else {
+      this.toTime = (v) => v as unknown as TradingViewTime;
+      this.fromTime = (t) => (typeof t === 'number' ? t : Number(t));
+    }
+  }
+
+  setDomain(_domain: Domain): void {
+    // owned by TV
+  }
+  setRange(_range: Range): void {
+    // owned by TV
+  }
+  domain(): Domain {
+    const r = this.ts.getVisibleRange();
+    if (!r) return [0, 0];
+    return [this.fromTime(r.from), this.fromTime(r.to)];
+  }
+  range(): Range {
+    // TV doesn't expose pixel bounds directly; consumers should use the
+    // adapter's plot bounds. Returning [NaN, NaN] makes accidental misuse
+    // loud rather than silently producing wrong pixels.
+    return [NaN, NaN];
+  }
+
+  scale(value: number): number {
+    const x = this.ts.timeToCoordinate(this.toTime(value));
+    return x === null ? NaN : x;
+  }
+
+  invert(pixel: number): number {
+    const t = this.ts.coordinateToTime(pixel);
+    return t === null ? NaN : this.fromTime(t);
+  }
+
+  ticks(count: number): number[] {
+    const r = this.ts.getVisibleRange();
+    if (!r) return [];
+    const from = this.fromTime(r.from);
+    const to = this.fromTime(r.to);
+    if (!isFinite(from) || !isFinite(to) || from === to) return [from];
+    const out: number[] = [];
+    for (let i = 0; i <= count; i++) {
+      out.push(from + ((to - from) * i) / count);
+    }
+    return out;
+  }
+}
+
+/**
+ * TradingViewPriceScaleAdapter — wraps a TV series's price scale as `Scale`.
+ */
+class TradingViewPriceScaleAdapter implements Scale {
+  private s: TradingViewSeries;
+  constructor(series: TradingViewSeries) {
+    this.s = series;
+  }
+  setDomain(_d: Domain): void {}
+  setRange(_r: Range): void {}
+  domain(): Domain {
+    // TV does not expose visible price range directly via the series API
+    // (you can compute it from the price scale options + visible data, but
+    // that's a separate dance). Domain queries from overlays should be rare
+    // — they should be using `scale(price)` instead.
+    return [NaN, NaN];
+  }
+  range(): Range {
+    return [NaN, NaN];
+  }
+  scale(price: number): number {
+    const y = this.s.priceToCoordinate(price);
+    return y === null ? NaN : y;
+  }
+  invert(pixel: number): number {
+    const p = this.s.coordinateToPrice(pixel);
+    return p === null ? NaN : p;
+  }
+  ticks(_count: number): number[] {
+    // No reliable way to read TV's price ticks; leave empty.
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+
 export class TradingViewOverlayAdapter implements Adapter {
-  readonly options: TradingViewOverlayAdapterOptions;
+  readonly tvChart: TradingViewChart;
+  readonly priceSeries: TradingViewSeries;
+  readonly xScale: Scale;
+  readonly yScale: Scale;
+  readonly viewport: Viewport;
+  readonly canvas: HTMLCanvasElement;
+  readonly ctx: CanvasContext;
+
+  private container: HTMLElement;
+  private chartElement: HTMLElement;
+  private layers: Layer[] = [];
+  private resizeObserver: ResizeObserver | null = null;
+  private rafHandle: number | null = null;
+  private destroyed = false;
+  private timeUnit: 'seconds' | 'milliseconds';
+  private onLogical: (r: TradingViewLogicalRange | null) => void;
+  private onCrosshair: ((param: any) => void) | null = null;
 
   constructor(options: TradingViewOverlayAdapterOptions) {
-    this.options = options;
+    this.tvChart = options.chart;
+    this.priceSeries = options.priceSeries;
+    this.timeUnit = options.timeUnit ?? 'seconds';
+
+    this.chartElement = this.tvChart.chartElement();
+    this.container = options.container ?? (this.chartElement.parentElement as HTMLElement);
+    if (!this.container) {
+      throw new Error(
+        'TradingViewOverlayAdapter: no container — pass `container` explicitly when the chart is not yet attached to a parent.',
+      );
+    }
+
+    // Build overlay canvas, absolute-positioned over the chart element.
+    this.canvas = document.createElement('canvas');
+    this.canvas.style.position = 'absolute';
+    this.canvas.style.left = '0';
+    this.canvas.style.top = '0';
+    this.canvas.style.pointerEvents = 'none';
+    this.canvas.style.zIndex = String(options.zIndex ?? 10);
+    // Ensure container can position the canvas (we don't override an
+    // existing 'relative' / 'absolute'; only set if currently 'static').
+    const cs = getComputedStyle(this.container);
+    if (cs.position === 'static') this.container.style.position = 'relative';
+    this.container.appendChild(this.canvas);
+
+    this.ctx = new CanvasContext(this.canvas, { dpr: options.dpr });
+
+    this.xScale = new TradingViewTimeScaleAdapter(this.tvChart.timeScale(), this.timeUnit);
+    this.yScale = new TradingViewPriceScaleAdapter(this.priceSeries);
+
+    // Read-only viewport whose domains mirror TV. Overlays subscribe to
+    // `change` if they want to know when the visible window shifts.
+    this.viewport = new Viewport({
+      xDomain: this.xScale.domain(),
+      yDomain: [0, 1],
+    });
+
+    // TV → invalidate on logical range change. TV invokes synchronously,
+    // so we coalesce through requestAnimationFrame just like Chart does.
+    this.onLogical = () => {
+      this.syncViewportDomain();
+      this.invalidate();
+    };
+    this.tvChart.timeScale().subscribeVisibleLogicalRangeChange(this.onLogical);
+
+    // ResizeObserver on the chart element: redraw + resize our canvas.
+    if (typeof ResizeObserver !== 'undefined') {
+      this.resizeObserver = new ResizeObserver(() => this.handleResize());
+      this.resizeObserver.observe(this.chartElement);
+    }
+    this.handleResize();
+
+    // Crosshair-move fires on TV's internal layout settles too — useful
+    // because the logical-range change alone misses small zoom updates.
+    if (typeof this.tvChart.subscribeCrosshairMove === 'function') {
+      this.onCrosshair = () => this.invalidate();
+      this.tvChart.subscribeCrosshairMove(this.onCrosshair);
+    }
   }
 
-  private notImplemented(method: string): never {
-    throw new Error(
-      `TradingViewOverlayAdapter.${method}() is not implemented in v0.1.0; targeted for v0.2. ` +
-        `Use VanillaChartAdapter for now.`,
-    );
-  }
+  // -- Adapter implementation ------------------------------------------------
 
   getCanvas(): HTMLCanvasElement {
-    return this.notImplemented('getCanvas');
+    return this.canvas;
   }
 
   getViewport(): Viewport {
-    return this.notImplemented('getViewport');
+    return this.viewport;
   }
 
-  addLayer(_layer: Layer): void {
-    return this.notImplemented('addLayer');
+  addLayer(layer: Layer): void {
+    this.layers.push(layer);
+    this.layers.sort((a, b) => a.zIndex - b.zIndex);
+    this.invalidate();
   }
 
-  removeLayer(_idOrLayer: string | Layer): void {
-    return this.notImplemented('removeLayer');
+  removeLayer(idOrLayer: string | Layer): void {
+    const id = typeof idOrLayer === 'string' ? idOrLayer : idOrLayer.id;
+    this.layers = this.layers.filter((l) => l.id !== id);
+    this.invalidate();
   }
 
   invalidate(): void {
-    return this.notImplemented('invalidate');
+    if (this.rafHandle !== null || this.destroyed) return;
+    if (typeof requestAnimationFrame === 'undefined') return;
+    this.rafHandle = requestAnimationFrame(() => {
+      this.rafHandle = null;
+      this.render();
+    });
   }
 
-  toPixel(_x: number, _y: number): { x: number; y: number } {
-    return this.notImplemented('toPixel');
+  /**
+   * Map a (time, price) pair in data space to overlay-canvas pixel coords.
+   * Returns `{ NaN, NaN }` if either coordinate is outside the visible
+   * range (TV returns null in that case).
+   */
+  toPixel(time: number, price: number): { x: number; y: number } {
+    return { x: this.xScale.scale(time), y: this.yScale.scale(price) };
   }
 
-  toData(_px: number, _py: number): { x: number; y: number } {
-    return this.notImplemented('toData');
+  toData(px: number, py: number): { x: number; y: number } {
+    return { x: this.xScale.invert(px), y: this.yScale.invert(py) };
+  }
+
+  /** Synchronously draw all visible layers. Mostly internal — prefer `invalidate()`. */
+  render(): void {
+    if (this.destroyed) return;
+    this.ctx.clear();
+    for (const l of this.layers) {
+      if (!l.visible) continue;
+      l.draw(this.ctx, this.viewport);
+    }
+  }
+
+  destroy(): void {
+    this.destroyed = true;
+    if (this.rafHandle !== null && typeof cancelAnimationFrame !== 'undefined') {
+      cancelAnimationFrame(this.rafHandle);
+      this.rafHandle = null;
+    }
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+      this.resizeObserver = null;
+    }
+    this.tvChart.timeScale().unsubscribeVisibleLogicalRangeChange(this.onLogical);
+    if (this.onCrosshair && this.tvChart.unsubscribeCrosshairMove) {
+      this.tvChart.unsubscribeCrosshairMove(this.onCrosshair);
+    }
+    this.canvas.parentElement?.removeChild(this.canvas);
+    this.viewport.bus.clear();
+  }
+
+  // -- private --------------------------------------------------------------
+
+  private handleResize(): void {
+    const rect = this.chartElement.getBoundingClientRect();
+    const w = rect.width;
+    const h = rect.height;
+    if (w > 0 && h > 0) {
+      // Position the overlay over the chart element, in container-local
+      // coordinates. Cheaper than absolute-fixed positioning.
+      const containerRect = this.container.getBoundingClientRect();
+      this.canvas.style.left = `${rect.left - containerRect.left}px`;
+      this.canvas.style.top = `${rect.top - containerRect.top}px`;
+      this.ctx.resize(w, h);
+      this.syncViewportDomain();
+      this.invalidate();
+    }
+  }
+
+  private syncViewportDomain(): void {
+    const xd = this.xScale.domain();
+    if (isFinite(xd[0]) && isFinite(xd[1])) {
+      this.viewport.setXDomain(xd);
+    }
   }
 }
