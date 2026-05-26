@@ -16,3 +16,4 @@ export { Layer, GridLayer, AxisLayer } from './Layer.js';
 export type { LayerPointerEvent } from './Layer.js';
 export { attachInteractions } from './interactions.js';
 export type { InteractionOptions } from './interactions.js';
+export { shareXAxis, shareYAxis, shareAxes } from './SharedAxis.js';
