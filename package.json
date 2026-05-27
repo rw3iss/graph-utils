@@ -47,8 +47,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "eslint 'src/**/*.ts'",
-    "playground": "pnpm --filter graph-utils-playground dev",
-    "prepare": "tsup"
+    "playground": "pnpm --filter graph-utils-playground dev"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
