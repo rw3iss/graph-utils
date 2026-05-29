@@ -38,4 +38,27 @@ describe('DrawingOverlay interaction fixes', () => {
     expect(pts[1]!.x).toBeCloseTo(250, 5);
     expect(pts[1]!.y).toBeCloseTo(170, 5);
   });
+
+  it('shows handles for all drawings while the select tool is active (discoverability)', () => {
+    const calls: { n: string }[] = [];
+    const rec = (n: string) => () => calls.push({ n });
+    const ctx: any = {
+      width: 800, height: 400,
+      line: rec('line'), rect: rec('rect'), circle: rec('circle'),
+      polyline: rec('polyline'), path: rec('path'), text: rec('text'),
+      gradient: () => ({}), withClip: (_x: any, _y: any, _w: any, _h: any, fn: any) => fn(), clear: rec('clear'),
+    };
+    const d = new DrawingOverlay(adapter(), {});
+    d.setTool('line');
+    d.onPointerDown!(down(100, 100));
+    d.onPointerDown!(down(200, 150)); // a line exists, not selected
+    d.setTool(null); // pan: unselected drawing draws no handles
+    calls.length = 0;
+    d.draw(ctx, {} as any);
+    expect(calls.filter((c) => c.n === 'circle').length).toBe(0);
+    d.setTool('select'); // select: handles shown even with nothing selected
+    calls.length = 0;
+    d.draw(ctx, {} as any);
+    expect(calls.filter((c) => c.n === 'circle').length).toBeGreaterThanOrEqual(2);
+  });
 });

@@ -1939,8 +1939,8 @@ var DEFAULT_STROKE = "#facc15";
 var DEFAULT_FILL = "rgba(250,204,21,0.12)";
 var DEFAULT_LINE_WIDTH = 1.5;
 var HANDLE_RADIUS = 4;
-var HANDLE_HIT_PX = 8;
-var BODY_HIT_PX = 6;
+var HANDLE_HIT_PX = 10;
+var BODY_HIT_PX = 8;
 var LABEL_FONT = "10px sans-serif";
 var LABEL_BG = "rgba(0,0,0,0.7)";
 var FIB_FILL = "rgba(250,204,21,0.06)";
@@ -2132,16 +2132,18 @@ var DrawingOverlay = class extends Layer {
         break;
       }
     }
-    const showHandles = selected || this.hoverHandle?.id === d.id;
+    const inSelect = this.tool === "select";
+    const showHandles = selected || inSelect || this.hoverHandle?.id === d.id;
     if (showHandles) {
       for (let i = 0; i < pts.length; i++) {
         const p = pts[i];
         if (!isFinitePt(p)) continue;
         const hot = this.dragPointIndex === i && this.selectedId === d.id || this.hoverHandle?.id === d.id && this.hoverHandle.index === i;
+        const emphasized = selected || hot;
         ctx.circle(p.x, p.y, hot ? HANDLE_RADIUS + 2 : HANDLE_RADIUS, {
-          fill: hot ? "#fff" : stroke,
+          fill: hot ? "#fff" : emphasized ? stroke : "transparent",
           stroke,
-          lineWidth: 1
+          lineWidth: emphasized ? 1 : 1.5
         });
       }
     }
