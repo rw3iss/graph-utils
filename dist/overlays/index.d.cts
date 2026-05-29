@@ -378,9 +378,18 @@ declare class Crosshair extends OverlayBase<null> {
  * Right-click finalizes a polygon: the adapter suppresses the browser
  * context menu and the `pointerdown` with `button === 2` is the signal we
  * read in `onPointerDown`.
+ *
+ * Finance shapes (hline / fib / measure / channel / cone / text) reuse the
+ * same machinery: every point lives in data space, gets a draggable handle,
+ * is select/drag/delete-able, and persists for free. Each new type just
+ * declares how many clicks finalize it (`pointsNeeded`) and adds a branch in
+ * `drawShape`. Levels / labels are recomputed every frame from the points so
+ * dragging a handle updates them live. Full-plot-width shapes (hline, fib
+ * right-edge) read the plot width from `ctx.width` at draw time, exactly like
+ * the `PriceLine` overlay.
  */
 
-type DrawingType = 'line' | 'polygon' | 'rect';
+type DrawingType = 'line' | 'polygon' | 'rect' | 'hline' | 'fib' | 'measure' | 'channel' | 'cone' | 'text';
 interface DrawingPoint {
     /** Adapter time unit (e.g. TV seconds). */
     x: number;
@@ -397,13 +406,23 @@ interface Drawing {
     type: DrawingType;
     points: DrawingPoint[];
     style?: DrawingStyle;
+    /** Note text — only used by the 'text' type. */
+    text?: string;
 }
+/** Fibonacci retracement levels (fraction of the p0→p1 price range). */
+declare const FIB_LEVELS: readonly number[];
 /** A shape tool, the 'select'/move tool, or no tool (idle / pan). */
 type DrawingTool = DrawingType | 'select' | null;
 interface DrawingOverlayOptions {
     id?: string;
     zIndex?: number;
     visible?: boolean;
+    /**
+     * Supplies the note string when a 'text' drawing is placed. Return null /
+     * empty to cancel the placement. Defaults to a `window.prompt` (or null in
+     * non-DOM environments / SSR).
+     */
+    textPrompt?: () => string | null;
 }
 type DrawingEvents = {
     /** Fired whenever the drawings array mutates (add / move / delete / restore). */
@@ -427,6 +446,9 @@ declare class DrawingOverlay extends Layer {
     private dragPointIndex;
     /** Handle currently hovered (for highlight), as (drawingId, pointIndex). */
     private hoverHandle;
+    /** Bar interval (seconds) for 'measure' Δbars; unset → measure omits Δbars. */
+    private barSeconds;
+    private readonly textPrompt;
     constructor(adapter: Adapter, opts?: DrawingOverlayOptions);
     setTool(tool: DrawingTool): void;
     getTool(): DrawingTool;
@@ -439,6 +461,12 @@ declare class DrawingOverlay extends Layer {
     /** Style applied to new shapes and to the current selection. */
     setStyle(s: DrawingStyle): void;
     getStyle(): DrawingStyle;
+    /**
+     * Set the bar interval (in seconds) used by 'measure' to report Δbars.
+     * Leave unset (or pass a non-finite value) and measure omits Δbars.
+     */
+    setBarSeconds(sec: number): void;
+    getBarSeconds(): number | null;
     /** Subscribe to a drawing event. Returns an unsubscribe fn. */
     on<K extends keyof DrawingEvents>(event: K, cb: (payload: DrawingEvents[K]) => void): () => void;
     /** Cancel the in-progress shape (host wires this to Esc). */
@@ -447,6 +475,18 @@ declare class DrawingOverlay extends Layer {
     getSelectedId(): string | null;
     draw(ctx: CanvasContext, _vp: Viewport): void;
     private drawShape;
+    /** Horizontal level across the full plot width, labeled with the price. */
+    private drawHLine;
+    /** Fibonacci retracement: a level line per FIB_LEVELS, right-extended. */
+    private drawFib;
+    /** Range box + signed Δprice / Δ% / Δtime (and Δbars when barSeconds set). */
+    private drawMeasure;
+    /** Trendline p0→p1 + a parallel line through p2, with the band shaded. */
+    private drawChannel;
+    /** Forecast cone: filled triangle apex(p0)–p1–p2 + the two edge lines. */
+    private drawCone;
+    /** Free text note with a subtle background rect for legibility. */
+    private drawNote;
     private drawInProgress;
     onPointerDown(e: LayerPointerEvent): void;
     onPointerMove(e: LayerPointerEvent): void;
@@ -463,4 +503,4 @@ declare class DrawingOverlay extends Layer {
     private emitChange;
 }
 
-export { BollingerBands, type BollingerBandsOptions, type BollingerSample, Crosshair, type CrosshairOptions, type Drawing, DrawingOverlay, type DrawingOverlayOptions, type DrawingPoint, type DrawingStyle, type DrawingTool, type DrawingType, type Order, OrderMarkers, type OrderMarkersOptions, OverlayBase, type OverlayOptions, PriceLine, type PriceLineOptions, type PriceLineSpec, type Signal, SignalArrows, type SignalArrowsOptions, ThresholdBand, type ThresholdBandOptions, type ThresholdBandSpec, VWAP, type VWAPOptions, type VWAPSample, type Zone, ZoneBoxes, type ZoneBoxesOptions, computeBands, computeVWAP };
+export { BollingerBands, type BollingerBandsOptions, type BollingerSample, Crosshair, type CrosshairOptions, type Drawing, DrawingOverlay, type DrawingOverlayOptions, type DrawingPoint, type DrawingStyle, type DrawingTool, type DrawingType, FIB_LEVELS, type Order, OrderMarkers, type OrderMarkersOptions, OverlayBase, type OverlayOptions, PriceLine, type PriceLineOptions, type PriceLineSpec, type Signal, SignalArrows, type SignalArrowsOptions, ThresholdBand, type ThresholdBandOptions, type ThresholdBandSpec, VWAP, type VWAPOptions, type VWAPSample, type Zone, ZoneBoxes, type ZoneBoxesOptions, computeBands, computeVWAP };

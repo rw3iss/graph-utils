@@ -307,26 +307,26 @@ var BollingerBands = class extends OverlayBase {
     ctx.polyline(mids, { stroke: this.midColor, lineWidth: this.lineWidth });
   }
 };
-function computeBands(data, window, k) {
+function computeBands(data, window2, k) {
   const n = data.length;
   const upper = new Array(n).fill(NaN);
   const mid = new Array(n).fill(NaN);
   const lower = new Array(n).fill(NaN);
-  if (window <= 0 || n < window) return { upper, mid, lower };
+  if (window2 <= 0 || n < window2) return { upper, mid, lower };
   let sum = 0;
   let sumSq = 0;
   for (let i = 0; i < n; i++) {
     const v = data[i].v;
     sum += v;
     sumSq += v * v;
-    if (i >= window) {
-      const out = data[i - window].v;
+    if (i >= window2) {
+      const out = data[i - window2].v;
       sum -= out;
       sumSq -= out * out;
     }
-    if (i >= window - 1) {
-      const m = sum / window;
-      const variance = Math.max(0, sumSq / window - m * m);
+    if (i >= window2 - 1) {
+      const m = sum / window2;
+      const variance = Math.max(0, sumSq / window2 - m * m);
       const sd = Math.sqrt(variance);
       mid[i] = m;
       upper[i] = m + k * sd;
@@ -539,12 +539,32 @@ var EventBus = class {
 };
 
 // src/overlays/DrawingOverlay.ts
+var FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+var POINTS_NEEDED = {
+  hline: 1,
+  text: 1,
+  line: 2,
+  rect: 2,
+  measure: 2,
+  fib: 2,
+  channel: 3,
+  cone: 3,
+  polygon: -1
+};
 var DEFAULT_STROKE = "#facc15";
 var DEFAULT_FILL = "rgba(250,204,21,0.12)";
 var DEFAULT_LINE_WIDTH = 1.5;
 var HANDLE_RADIUS = 4;
 var HANDLE_HIT_PX = 8;
 var BODY_HIT_PX = 6;
+var LABEL_FONT = "10px sans-serif";
+var LABEL_BG = "rgba(0,0,0,0.7)";
+var FIB_FILL = "rgba(250,204,21,0.06)";
+var MEASURE_UP = "#22c55e";
+var MEASURE_DOWN = "#ef4444";
+function defaultTextPrompt() {
+  return typeof window !== "undefined" ? window.prompt("Note text:") : null;
+}
 var idCounter = 0;
 var DrawingOverlay = class extends Layer {
   adapter;
@@ -562,11 +582,15 @@ var DrawingOverlay = class extends Layer {
   dragPointIndex = null;
   /** Handle currently hovered (for highlight), as (drawingId, pointIndex). */
   hoverHandle = null;
+  /** Bar interval (seconds) for 'measure' Δbars; unset → measure omits Δbars. */
+  barSeconds = null;
+  textPrompt;
   constructor(adapter, opts = {}) {
     super(opts.id ?? "drawings");
     this.adapter = adapter;
     this.zIndex = opts.zIndex ?? 50;
     this.visible = opts.visible ?? true;
+    this.textPrompt = opts.textPrompt ?? defaultTextPrompt;
   }
   // -- public API -----------------------------------------------------------
   setTool(tool) {
@@ -629,6 +653,16 @@ var DrawingOverlay = class extends Layer {
   getStyle() {
     return { ...this.style };
   }
+  /**
+   * Set the bar interval (in seconds) used by 'measure' to report Δbars.
+   * Leave unset (or pass a non-finite value) and measure omits Δbars.
+   */
+  setBarSeconds(sec) {
+    this.barSeconds = Number.isFinite(sec) && sec > 0 ? sec : null;
+  }
+  getBarSeconds() {
+    return this.barSeconds;
+  }
   /** Subscribe to a drawing event. Returns an unsubscribe fn. */
   on(event, cb) {
     return this.bus.on(event, cb);
@@ -655,35 +689,61 @@ var DrawingOverlay = class extends Layer {
     const fill = d.style?.fill ?? DEFAULT_FILL;
     const lineWidth = d.style?.lineWidth ?? DEFAULT_LINE_WIDTH;
     const pts = d.points.map((p) => this.adapter.toPixel(p.x, p.y));
-    if (d.type === "line") {
-      const a = pts[0];
-      const b = pts[1];
-      if (a && b && isFinitePt(a) && isFinitePt(b)) {
-        ctx.line(a.x, a.y, b.x, b.y, { stroke, lineWidth });
+    const sty = { stroke, fill, lineWidth };
+    switch (d.type) {
+      case "line": {
+        const a = pts[0];
+        const b = pts[1];
+        if (a && b && isFinitePt(a) && isFinitePt(b)) {
+          ctx.line(a.x, a.y, b.x, b.y, { stroke, lineWidth });
+        }
+        break;
       }
-    } else if (d.type === "rect") {
-      const a = pts[0];
-      const b = pts[1];
-      if (a && b && isFinitePt(a) && isFinitePt(b)) {
-        const x = Math.min(a.x, b.x);
-        const y = Math.min(a.y, b.y);
-        const w = Math.abs(b.x - a.x);
-        const h = Math.abs(b.y - a.y);
-        ctx.rect(x, y, w, h, { stroke, fill, lineWidth });
+      case "rect": {
+        const a = pts[0];
+        const b = pts[1];
+        if (a && b && isFinitePt(a) && isFinitePt(b)) {
+          const x = Math.min(a.x, b.x);
+          const y = Math.min(a.y, b.y);
+          const w = Math.abs(b.x - a.x);
+          const h = Math.abs(b.y - a.y);
+          ctx.rect(x, y, w, h, { stroke, fill, lineWidth });
+        }
+        break;
       }
-    } else {
-      const finite = pts.filter(isFinitePt);
-      if (finite.length >= 3) {
-        ctx.path(
-          (c) => {
-            c.moveTo(finite[0].x, finite[0].y);
-            for (let i = 1; i < finite.length; i++) c.lineTo(finite[i].x, finite[i].y);
-            c.closePath();
-          },
-          { stroke, fill, lineWidth }
-        );
-      } else if (finite.length === 2) {
-        ctx.line(finite[0].x, finite[0].y, finite[1].x, finite[1].y, { stroke, lineWidth });
+      case "hline":
+        this.drawHLine(ctx, d, sty);
+        break;
+      case "fib":
+        this.drawFib(ctx, d, sty);
+        break;
+      case "measure":
+        this.drawMeasure(ctx, d, sty);
+        break;
+      case "channel":
+        this.drawChannel(ctx, d, sty);
+        break;
+      case "cone":
+        this.drawCone(ctx, d, sty);
+        break;
+      case "text":
+        this.drawNote(ctx, d, sty);
+        break;
+      default: {
+        const finite = pts.filter(isFinitePt);
+        if (finite.length >= 3) {
+          ctx.path(
+            (c) => {
+              c.moveTo(finite[0].x, finite[0].y);
+              for (let i = 1; i < finite.length; i++) c.lineTo(finite[i].x, finite[i].y);
+              c.closePath();
+            },
+            { stroke, fill, lineWidth }
+          );
+        } else if (finite.length === 2) {
+          ctx.line(finite[0].x, finite[0].y, finite[1].x, finite[1].y, { stroke, lineWidth });
+        }
+        break;
       }
     }
     const showHandles = selected || this.hoverHandle?.id === d.id;
@@ -700,13 +760,162 @@ var DrawingOverlay = class extends Layer {
       }
     }
   }
+  // -- finance-shape renderers ----------------------------------------------
+  // Each takes the resolved { stroke, fill, lineWidth } and reprojects the
+  // drawing's data-space points through adapter.toPixel so it scales/pans.
+  /** Horizontal level across the full plot width, labeled with the price. */
+  drawHLine(ctx, d, sty) {
+    const p0 = d.points[0];
+    if (!p0) return;
+    const { y } = this.adapter.toPixel(p0.x, p0.y);
+    if (!Number.isFinite(y)) return;
+    ctx.line(0, y, ctx.width, y, { stroke: sty.stroke, lineWidth: sty.lineWidth });
+    drawLabel(ctx, fmtPrice(p0.y), ctx.width - 4, y - 2, sty.stroke, "right", "bottom");
+  }
+  /** Fibonacci retracement: a level line per FIB_LEVELS, right-extended. */
+  drawFib(ctx, d, sty) {
+    const p0 = d.points[0];
+    const p1 = d.points[1];
+    if (!p0 || !p1) return;
+    const xStartData = Math.min(p0.x, p1.x);
+    const left = this.adapter.toPixel(xStartData, p0.y).x;
+    const x0 = Number.isFinite(left) ? left : 0;
+    const right = ctx.width;
+    const levelYs = [];
+    for (const level of FIB_LEVELS) {
+      const priceL = fibPrice(p0.y, p1.y, level);
+      const { y } = this.adapter.toPixel(xStartData, priceL);
+      levelYs.push(y);
+    }
+    for (let i = 1; i < levelYs.length; i++) {
+      const ya = levelYs[i - 1];
+      const yb = levelYs[i];
+      if (!Number.isFinite(ya) || !Number.isFinite(yb)) continue;
+      const top = Math.min(ya, yb);
+      ctx.rect(x0, top, Math.max(0, right - x0), Math.abs(yb - ya), { fill: FIB_FILL });
+    }
+    for (let i = 0; i < FIB_LEVELS.length; i++) {
+      const y = levelYs[i];
+      if (!Number.isFinite(y)) continue;
+      const level = FIB_LEVELS[i];
+      const priceL = fibPrice(p0.y, p1.y, level);
+      ctx.line(x0, y, right, y, { stroke: sty.stroke, lineWidth: sty.lineWidth });
+      drawLabel(
+        ctx,
+        `${(level * 100).toFixed(1)}%  ${fmtPrice(priceL)}`,
+        x0 + 4,
+        y - 2,
+        sty.stroke,
+        "left",
+        "bottom"
+      );
+    }
+  }
+  /** Range box + signed Δprice / Δ% / Δtime (and Δbars when barSeconds set). */
+  drawMeasure(ctx, d, sty) {
+    const p0 = d.points[0];
+    const p1 = d.points[1];
+    if (!p0 || !p1) return;
+    const a = this.adapter.toPixel(p0.x, p0.y);
+    const b = this.adapter.toPixel(p1.x, p1.y);
+    if (!isFinitePt(a) || !isFinitePt(b)) return;
+    const dPrice = p1.y - p0.y;
+    const up = dPrice >= 0;
+    const color = up ? MEASURE_UP : MEASURE_DOWN;
+    const tint = up ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)";
+    const x = Math.min(a.x, b.x);
+    const y = Math.min(a.y, b.y);
+    ctx.rect(x, y, Math.abs(b.x - a.x), Math.abs(b.y - a.y), {
+      stroke: color,
+      fill: tint,
+      lineWidth: sty.lineWidth
+    });
+    const dPct = p0.y !== 0 ? dPrice / p0.y * 100 : 0;
+    const lines = [
+      `${dPrice >= 0 ? "+" : ""}${fmtPrice(dPrice)}  (${dPct >= 0 ? "+" : ""}${dPct.toFixed(2)}%)`,
+      humanDuration(Math.abs(p1.x - p0.x))
+    ];
+    if (this.barSeconds && this.barSeconds > 0) {
+      lines[1] += `  ${Math.round(Math.abs(p1.x - p0.x) / this.barSeconds)} bars`;
+    }
+    drawBox(ctx, lines, b.x + 6, b.y, color);
+  }
+  /** Trendline p0→p1 + a parallel line through p2, with the band shaded. */
+  drawChannel(ctx, d, sty) {
+    const p0 = d.points[0];
+    const p1 = d.points[1];
+    const p2 = d.points[2];
+    if (!p0 || !p1) return;
+    const a = this.adapter.toPixel(p0.x, p0.y);
+    const b = this.adapter.toPixel(p1.x, p1.y);
+    if (p1.x === p0.x) {
+      if (isFinitePt(a) && isFinitePt(b)) ctx.line(a.x, a.y, b.x, b.y, { stroke: sty.stroke, lineWidth: sty.lineWidth });
+      return;
+    }
+    const slope = (p1.y - p0.y) / (p1.x - p0.x);
+    if (p2) {
+      const q0 = this.adapter.toPixel(p0.x, p2.y + slope * (p0.x - p2.x));
+      const q1 = this.adapter.toPixel(p1.x, p2.y + slope * (p1.x - p2.x));
+      if (isFinitePt(a) && isFinitePt(b) && isFinitePt(q0) && isFinitePt(q1)) {
+        ctx.path(
+          (c) => {
+            c.moveTo(a.x, a.y);
+            c.lineTo(b.x, b.y);
+            c.lineTo(q1.x, q1.y);
+            c.lineTo(q0.x, q0.y);
+            c.closePath();
+          },
+          { fill: sty.fill }
+        );
+        ctx.line(q0.x, q0.y, q1.x, q1.y, { stroke: sty.stroke, lineWidth: sty.lineWidth });
+      }
+    }
+    if (isFinitePt(a) && isFinitePt(b)) ctx.line(a.x, a.y, b.x, b.y, { stroke: sty.stroke, lineWidth: sty.lineWidth });
+  }
+  /** Forecast cone: filled triangle apex(p0)–p1–p2 + the two edge lines. */
+  drawCone(ctx, d, sty) {
+    const p0 = d.points[0];
+    const p1 = d.points[1];
+    const p2 = d.points[2];
+    if (!p0) return;
+    const apex = this.adapter.toPixel(p0.x, p0.y);
+    if (!isFinitePt(apex)) return;
+    const up = p1 ? this.adapter.toPixel(p1.x, p1.y) : null;
+    const lo = p2 ? this.adapter.toPixel(p2.x, p2.y) : null;
+    if (up && lo && isFinitePt(up) && isFinitePt(lo)) {
+      ctx.path(
+        (c) => {
+          c.moveTo(apex.x, apex.y);
+          c.lineTo(up.x, up.y);
+          c.lineTo(lo.x, lo.y);
+          c.closePath();
+        },
+        { fill: sty.fill }
+      );
+      ctx.line(apex.x, apex.y, up.x, up.y, { stroke: sty.stroke, lineWidth: sty.lineWidth });
+      ctx.line(apex.x, apex.y, lo.x, lo.y, { stroke: sty.stroke, lineWidth: sty.lineWidth });
+    } else {
+      if (up && isFinitePt(up)) ctx.line(apex.x, apex.y, up.x, up.y, { stroke: sty.stroke, lineWidth: sty.lineWidth });
+      if (lo && isFinitePt(lo)) ctx.line(apex.x, apex.y, lo.x, lo.y, { stroke: sty.stroke, lineWidth: sty.lineWidth });
+    }
+  }
+  /** Free text note with a subtle background rect for legibility. */
+  drawNote(ctx, d, sty) {
+    const p0 = d.points[0];
+    if (!p0) return;
+    const a = this.adapter.toPixel(p0.x, p0.y);
+    if (!isFinitePt(a)) return;
+    const text = d.text ?? "";
+    if (text === "") return;
+    drawLabel(ctx, text, a.x, a.y, sty.stroke, "left", "middle");
+  }
   drawInProgress(ctx) {
     if (this.inProgress.length === 0 || this.inProgressType === null) return;
     const stroke = this.style.stroke ?? DEFAULT_STROKE;
     const fill = this.style.fill ?? DEFAULT_FILL;
     const lineWidth = this.style.lineWidth ?? DEFAULT_LINE_WIDTH;
     const pts = this.inProgress.map((p) => this.adapter.toPixel(p.x, p.y));
-    if (this.inProgressType === "rect") {
+    if (this.inProgressType === "rect" || this.inProgressType === "measure") {
       const a = pts[0];
       const b = this.cursorPx ?? pts[1] ?? null;
       if (a && b && isFinitePt(a) && isFinitePt(b)) {
@@ -746,13 +955,25 @@ var DrawingOverlay = class extends Layer {
       return;
     }
     if (isRightClick) return;
+    const type = this.tool;
     const data = this.adapter.toData(e.x, e.y);
-    if (this.inProgressType === null) this.inProgressType = this.tool;
+    if (this.inProgressType === null) this.inProgressType = type;
     this.inProgress.push({ x: data.x, y: data.y });
-    if (this.tool === "line" && this.inProgress.length >= 2) {
-      this.finalizeShape("line", this.inProgress.slice(0, 2));
-    } else if (this.tool === "rect" && this.inProgress.length >= 2) {
-      this.finalizeShape("rect", this.inProgress.slice(0, 2));
+    const needed = POINTS_NEEDED[type];
+    if (needed > 0 && this.inProgress.length >= needed) {
+      const points = this.inProgress.slice(0, needed);
+      if (type === "text") {
+        const text = this.textPrompt();
+        if (text === null || text === "") {
+          this.clearInProgress();
+          this.adapter.invalidate();
+          return;
+        }
+        this.finalizeShape(type, points, text);
+      } else {
+        this.finalizeShape(type, points);
+      }
+      return;
     }
     this.adapter.invalidate();
   }
@@ -817,7 +1038,7 @@ var DrawingOverlay = class extends Layer {
       const pts = d.points.map((p) => this.adapter.toPixel(p.x, p.y)).filter(isFinitePt);
       if (d.type === "line") {
         if (pts.length === 2 && segDist(px, py, pts[0], pts[1]) <= BODY_HIT_PX) return d.id;
-      } else if (d.type === "rect") {
+      } else if (d.type === "rect" || d.type === "measure") {
         if (pts.length === 2) {
           const x = Math.min(pts[0].x, pts[1].x);
           const y = Math.min(pts[0].y, pts[1].y);
@@ -825,6 +1046,21 @@ var DrawingOverlay = class extends Layer {
           const h = Math.abs(pts[1].y - pts[0].y);
           if (pointInRect(px, py, x, y, w, h, BODY_HIT_PX)) return d.id;
         }
+      } else if (d.type === "hline") {
+        if (pts.length >= 1 && Math.abs(py - pts[0].y) <= BODY_HIT_PX) return d.id;
+      } else if (d.type === "fib") {
+        if (pts.length === 2) {
+          for (const level of FIB_LEVELS) {
+            const yl = this.adapter.toPixel(d.points[0].x, fibPrice(d.points[0].y, d.points[1].y, level)).y;
+            if (Number.isFinite(yl) && Math.abs(py - yl) <= BODY_HIT_PX) return d.id;
+          }
+        }
+      } else if (d.type === "channel") {
+        if (pts.length >= 2 && segDist(px, py, pts[0], pts[1]) <= BODY_HIT_PX) return d.id;
+        if (pts.length >= 3 && segDist(px, py, pts[1], pts[2]) <= BODY_HIT_PX) return d.id;
+        if (pts.length >= 3 && segDist(px, py, pts[0], pts[2]) <= BODY_HIT_PX) return d.id;
+      } else if (d.type === "text") {
+        if (pts.length >= 1 && dist(px, py, pts[0].x, pts[0].y) <= HANDLE_HIT_PX) return d.id;
       } else {
         if (pts.length >= 3 && pointInPolygon(px, py, pts)) return d.id;
         for (let k = 0; k < pts.length; k++) {
@@ -837,13 +1073,14 @@ var DrawingOverlay = class extends Layer {
     return null;
   }
   // -- internals ------------------------------------------------------------
-  finalizeShape(type, points) {
+  finalizeShape(type, points, text) {
     const d = {
       id: nextId(),
       type,
       points: points.map((p) => ({ x: p.x, y: p.y })),
       style: { ...this.style }
     };
+    if (text !== void 0) d.text = text;
     this.drawings.push(d);
     this.clearInProgress();
     this.emitChange();
@@ -870,6 +1107,64 @@ var DrawingOverlay = class extends Layer {
     this.bus.emit("change", this.getDrawings());
   }
 };
+function fibPrice(y0, y1, level) {
+  return y0 + (y1 - y0) * level;
+}
+function fmtPrice(v) {
+  if (!Number.isFinite(v)) return String(v);
+  const abs = Math.abs(v);
+  const digits = abs >= 1e3 ? 2 : abs >= 1 ? 2 : 6;
+  return Number(v.toFixed(digits)).toString();
+}
+function humanDuration(seconds) {
+  const s = Math.abs(Math.round(seconds));
+  if (s === 0) return "0s";
+  const d = Math.floor(s / 86400);
+  const h = Math.floor(s % 86400 / 3600);
+  const m = Math.floor(s % 3600 / 60);
+  const sec = s % 60;
+  const parts = [];
+  if (d) parts.push(`${d}d`);
+  if (h) parts.push(`${h}h`);
+  if (m && !d) parts.push(`${m}m`);
+  if (sec && !d && !h && !m) parts.push(`${sec}s`);
+  return parts.length ? parts.slice(0, 2).join(" ") : `${s}s`;
+}
+function drawLabel(ctx, text, x, y, color, align, baseline) {
+  const padX = 3;
+  const padY = 2;
+  const fontH = 10;
+  const w = approxTextWidth2(text, fontH);
+  let bx = x;
+  if (align === "right") bx = x - w;
+  else if (align === "center") bx = x - w / 2;
+  let by = y;
+  if (baseline === "bottom") by = y - fontH;
+  else if (baseline === "middle") by = y - fontH / 2;
+  ctx.rect(bx - padX, by - padY, w + padX * 2, fontH + padY * 2, { fill: LABEL_BG });
+  ctx.text(text, x, y, { font: LABEL_FONT, color, align, baseline });
+}
+function drawBox(ctx, lines, x, y, color) {
+  const fontH = 11;
+  const lineGap = 3;
+  const padX = 5;
+  const padY = 4;
+  const w = Math.max(...lines.map((l) => approxTextWidth2(l, fontH)));
+  const h = lines.length * fontH + (lines.length - 1) * lineGap;
+  ctx.rect(x, y, w + padX * 2, h + padY * 2, {
+    fill: "rgba(0,0,0,0.78)",
+    stroke: color,
+    lineWidth: 1
+  });
+  let ty = y + padY;
+  for (const l of lines) {
+    ctx.text(l, x + padX, ty, { font: `${fontH}px sans-serif`, color, align: "left", baseline: "top" });
+    ty += fontH + lineGap;
+  }
+}
+function approxTextWidth2(text, fontH) {
+  return Math.ceil(text.length * fontH * 0.58);
+}
 function isFinitePt(p) {
   return Number.isFinite(p.x) && Number.isFinite(p.y);
 }
@@ -907,12 +1202,14 @@ function pointInPolygon(px, py, pts) {
   return inside;
 }
 function cloneDrawing(d) {
-  return {
+  const out = {
     id: d.id,
     type: d.type,
     points: d.points.map((p) => ({ x: p.x, y: p.y })),
     style: d.style ? { ...d.style } : void 0
   };
+  if (d.text !== void 0) out.text = d.text;
+  return out;
 }
 function nextId() {
   idCounter += 1;
@@ -922,6 +1219,7 @@ function nextId() {
 exports.BollingerBands = BollingerBands;
 exports.Crosshair = Crosshair;
 exports.DrawingOverlay = DrawingOverlay;
+exports.FIB_LEVELS = FIB_LEVELS;
 exports.OrderMarkers = OrderMarkers;
 exports.OverlayBase = OverlayBase;
 exports.PriceLine = PriceLine;

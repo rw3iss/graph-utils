@@ -20,8 +20,10 @@
  *
  * Interactivity:
  *   - Crosshair:     vertical + horizontal tracker w/ readout label
- *   - DrawingOverlay: data-anchored draggable annotations (line / polygon /
- *                     rect) with a tool model + 'change'/'toolidle' events
+ *   - DrawingOverlay: data-anchored draggable annotations with a tool model +
+ *                     'change'/'toolidle' events. Shapes: line / polygon /
+ *                     rect plus the finance set hline / fib / measure /
+ *                     channel / cone / text.
  *
  * v0.3 plans: PredictionFan, RegimeStripes, MLConfidenceHeatmap,
  *             StrategyTraces.
@@ -53,7 +55,7 @@ export type { VWAPSample, VWAPOptions } from './VWAP.js';
 export { Crosshair } from './Crosshair.js';
 export type { CrosshairOptions } from './Crosshair.js';
 
-export { DrawingOverlay } from './DrawingOverlay.js';
+export { DrawingOverlay, FIB_LEVELS } from './DrawingOverlay.js';
 export type {
   DrawingType,
   DrawingPoint,

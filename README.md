@@ -146,7 +146,7 @@ new Crosshair(adapter, { id: 'x' }).attach(tv.chartElement());
 | `BollingerBands`                    | Rolling SMA + std-dev bands.                  |
 | `VWAP`                              | Cumulative volume-weighted average price.     |
 | `Crosshair`                         | Vertical + horizontal tracker w/ readout.     |
-| `DrawingOverlay`                    | Interactive line / polygon / rect annotations, data-anchored + draggable. |
+| `DrawingOverlay`                    | Interactive annotations (line / polygon / rect + finance set: hline / fib / measure / channel / cone / text), data-anchored + draggable. |
 
 ## Architecture
 
@@ -230,9 +230,14 @@ The constraints:
 
 ## Interactive drawing
 
-`DrawingOverlay` lets the user draw data-anchored annotations (line,
-polygon, rect) that pan and zoom with the chart — every point is stored
-in **data space** and re-projected through `adapter.toPixel` each frame.
+`DrawingOverlay` lets the user draw data-anchored annotations that pan
+and zoom with the chart — every point is stored in **data space** and
+re-projected through `adapter.toPixel` each frame. Shapes: `line`,
+`polygon`, `rect`, plus a finance set — `hline` (price level), `fib`
+(Fibonacci retracement), `measure` (Δprice / Δ% / Δtime / Δbars box),
+`channel` (parallel trend channel), `cone` (forecast cone), and `text`
+(note). Each gets draggable handles, select/move/delete, and
+persistence for free.
 
 ```ts
 import { TradingViewOverlayAdapter } from '@rw3iss/graph-utils/adapters';
@@ -246,8 +251,19 @@ adapter.addLayer(draw);
 toolbarLineBtn.onclick    = () => draw.setTool('line');
 toolbarPolyBtn.onclick    = () => draw.setTool('polygon'); // right-click finalizes
 toolbarRectBtn.onclick    = () => draw.setTool('rect');
+toolbarHLineBtn.onclick   = () => draw.setTool('hline');   // 1 click → full-width level
+toolbarFibBtn.onclick     = () => draw.setTool('fib');     // 2 clicks → retracement
+toolbarMeasureBtn.onclick = () => draw.setTool('measure'); // 2 clicks → Δ box
+toolbarChannelBtn.onclick = () => draw.setTool('channel'); // 3 clicks → trend + parallel
+toolbarConeBtn.onclick    = () => draw.setTool('cone');    // 3 clicks → forecast cone
+toolbarTextBtn.onclick    = () => draw.setTool('text');    // 1 click → prompts for note
 toolbarSelectBtn.onclick  = () => draw.setTool('select');  // drag handles / move
 toolbarPanBtn.onclick     = () => draw.setTool(null);      // back to chart pan/zoom
+
+// Optional: tell 'measure' the bar interval so it can report Δbars.
+draw.setBarSeconds(60); // 1-minute bars
+// Optional: supply note text yourself instead of window.prompt:
+// new DrawingOverlay(adapter, { textPrompt: () => myInput.value || null });
 
 // Persistence: save on every mutation, restore on load.
 draw.on('change', (drawings) => localStorage.setItem('annotations', JSON.stringify(drawings)));
@@ -279,10 +295,17 @@ How it interacts with the host:
   alongside.
 
 Public API: `setTool / getTool`, `getDrawings / setDrawings`, `clear`,
-`deleteSelected`, `setStyle / getStyle`, `cancelInProgress`,
-`getSelectedId`, and `on('change' | 'toolidle', cb) → unsubscribe`. The
-`Drawing` shape is `{ id, type: 'line'|'polygon'|'rect', points:
-{x,y}[], style? }` where `x` is the adapter time unit and `y` is price.
+`deleteSelected`, `setStyle / getStyle`, `setBarSeconds / getBarSeconds`,
+`cancelInProgress`, `getSelectedId`, and `on('change' | 'toolidle', cb) →
+unsubscribe`. The `Drawing` shape is `{ id, type:
+'line'|'polygon'|'rect'|'hline'|'fib'|'measure'|'channel'|'cone'|'text',
+points: {x,y}[], style?, text? }` where `x` is the adapter time unit and
+`y` is price; `text` carries the note for `type: 'text'`. Point counts to
+finalize: hline/text = 1, line/rect/measure/fib = 2, channel/cone = 3,
+polygon = right-click. The exported `FIB_LEVELS` constant is the
+retracement ratio set. `textPrompt` (a `DrawingOverlayOptions` field)
+overrides where the note string comes from; returning `null`/`''`
+cancels the placement.
 
 ## Playground
 

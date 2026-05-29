@@ -7,7 +7,7 @@
  * default node environment.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { DrawingOverlay, type Drawing } from '../../src/overlays/DrawingOverlay.js';
+import { DrawingOverlay, FIB_LEVELS, type Drawing } from '../../src/overlays/DrawingOverlay.js';
 import type { Adapter } from '../../src/adapters/Adapter.js';
 import type { Layer } from '../../src/chart/Layer.js';
 import type { Viewport } from '../../src/core/Viewport.js';
@@ -266,5 +266,184 @@ describe('DrawingOverlay', () => {
     overlay.onPointerDown(pe(1, 1));
     overlay.onPointerDown(pe(2, 2));
     expect(cb).not.toHaveBeenCalled();
+  });
+});
+
+describe('DrawingOverlay — finance shapes', () => {
+  it('hline finalizes after 1 pointerdown', () => {
+    const a = fakeAdapter();
+    const overlay = new DrawingOverlay(a, { id: 'd' });
+    const idle = vi.fn();
+    overlay.on('toolidle', idle);
+    overlay.setTool('hline');
+    overlay.onPointerDown(pe(10, 250));
+    const drawings = overlay.getDrawings();
+    expect(drawings).toHaveLength(1);
+    expect(drawings[0]!.type).toBe('hline');
+    expect(drawings[0]!.points).toEqual([{ x: 10, y: 250 }]);
+    expect(idle).toHaveBeenCalledWith('hline');
+  });
+
+  it('measure finalizes after 2 pointerdowns', () => {
+    const a = fakeAdapter();
+    const overlay = new DrawingOverlay(a, { id: 'd' });
+    overlay.setTool('measure');
+    overlay.onPointerDown(pe(0, 100));
+    expect(overlay.getDrawings()).toHaveLength(0);
+    overlay.onPointerDown(pe(60, 130));
+    const drawings = overlay.getDrawings();
+    expect(drawings).toHaveLength(1);
+    expect(drawings[0]!.type).toBe('measure');
+    expect(drawings[0]!.points).toEqual([
+      { x: 0, y: 100 },
+      { x: 60, y: 130 },
+    ]);
+  });
+
+  it('fib finalizes after 2 pointerdowns', () => {
+    const a = fakeAdapter();
+    const overlay = new DrawingOverlay(a, { id: 'd' });
+    overlay.setTool('fib');
+    overlay.onPointerDown(pe(0, 100));
+    expect(overlay.getDrawings()).toHaveLength(0);
+    overlay.onPointerDown(pe(40, 200));
+    const drawings = overlay.getDrawings();
+    expect(drawings).toHaveLength(1);
+    expect(drawings[0]!.type).toBe('fib');
+  });
+
+  it('channel finalizes after 3 pointerdowns', () => {
+    const a = fakeAdapter();
+    const overlay = new DrawingOverlay(a, { id: 'd' });
+    overlay.setTool('channel');
+    overlay.onPointerDown(pe(0, 100));
+    overlay.onPointerDown(pe(50, 150));
+    expect(overlay.getDrawings()).toHaveLength(0); // still placing after 2
+    overlay.onPointerDown(pe(0, 120));
+    const drawings = overlay.getDrawings();
+    expect(drawings).toHaveLength(1);
+    expect(drawings[0]!.type).toBe('channel');
+    expect(drawings[0]!.points).toHaveLength(3);
+  });
+
+  it('cone finalizes after 3 pointerdowns', () => {
+    const a = fakeAdapter();
+    const overlay = new DrawingOverlay(a, { id: 'd' });
+    overlay.setTool('cone');
+    overlay.onPointerDown(pe(0, 100));
+    overlay.onPointerDown(pe(50, 140));
+    expect(overlay.getDrawings()).toHaveLength(0);
+    overlay.onPointerDown(pe(50, 60));
+    const drawings = overlay.getDrawings();
+    expect(drawings).toHaveLength(1);
+    expect(drawings[0]!.type).toBe('cone');
+    expect(drawings[0]!.points).toHaveLength(3);
+  });
+
+  it('fib level prices compute correctly for a known p0/p1', () => {
+    // p0.y = 100 (low), p1.y = 200 (high) → priceL = 100 + 100*level.
+    const p0y = 100;
+    const p1y = 200;
+    const computed = FIB_LEVELS.map((level) => p0y + (p1y - p0y) * level);
+    const want = [100, 123.6, 138.2, 150, 161.8, 178.6, 200];
+    expect(computed).toHaveLength(want.length);
+    computed.forEach((v, i) => expect(v).toBeCloseTo(want[i]!, 6));
+    // sanity: also confirms the standard ratio set is the one we ship.
+    expect([...FIB_LEVELS]).toEqual([0, 0.236, 0.382, 0.5, 0.618, 0.786, 1]);
+  });
+
+  it("'text' with a stubbed prompt returning '' cancels (no drawing)", () => {
+    const a = fakeAdapter();
+    const overlay = new DrawingOverlay(a, { id: 'd', textPrompt: () => '' });
+    const idle = vi.fn();
+    overlay.on('toolidle', idle);
+    overlay.setTool('text');
+    overlay.onPointerDown(pe(5, 5));
+    expect(overlay.getDrawings()).toHaveLength(0);
+    expect(idle).not.toHaveBeenCalled();
+  });
+
+  it("'text' with a stubbed prompt returning null cancels (no drawing)", () => {
+    const a = fakeAdapter();
+    const overlay = new DrawingOverlay(a, { id: 'd', textPrompt: () => null });
+    overlay.setTool('text');
+    overlay.onPointerDown(pe(5, 5));
+    expect(overlay.getDrawings()).toHaveLength(0);
+  });
+
+  it("'text' with a stubbed prompt returning 'hi' creates one with text:'hi'", () => {
+    const a = fakeAdapter();
+    const overlay = new DrawingOverlay(a, { id: 'd', textPrompt: () => 'hi' });
+    const idle = vi.fn();
+    overlay.on('toolidle', idle);
+    overlay.setTool('text');
+    overlay.onPointerDown(pe(7, 8));
+    const drawings = overlay.getDrawings();
+    expect(drawings).toHaveLength(1);
+    expect(drawings[0]!.type).toBe('text');
+    expect(drawings[0]!.text).toBe('hi');
+    expect(drawings[0]!.points).toEqual([{ x: 7, y: 8 }]);
+    expect(idle).toHaveBeenCalledWith('text');
+  });
+
+  it('setDrawings / getDrawings round-trips a fib + a channel (incl. text)', () => {
+    const a = fakeAdapter();
+    const overlay = new DrawingOverlay(a, { id: 'd' });
+    const input: Drawing[] = [
+      { id: 'fib-1', type: 'fib', points: [{ x: 1, y: 100 }, { x: 5, y: 200 }] },
+      {
+        id: 'chan-1',
+        type: 'channel',
+        points: [
+          { x: 0, y: 10 },
+          { x: 10, y: 20 },
+          { x: 0, y: 5 },
+        ],
+        style: { stroke: '#0f0' },
+      },
+      { id: 'note-1', type: 'text', points: [{ x: 2, y: 3 }], text: 'hello' },
+    ];
+    overlay.setDrawings(input);
+    const out = overlay.getDrawings();
+    expect(out).toEqual(input);
+    // deep copy: mutating output must not mutate internal state
+    out[0]!.points[0]!.y = 999;
+    out[2]!.text = 'mutated';
+    expect(overlay.getDrawings()[0]!.points[0]!.y).toBe(100);
+    expect(overlay.getDrawings()[2]!.text).toBe('hello');
+  });
+
+  it('setBarSeconds stores the value without structural change', () => {
+    const a = fakeAdapter();
+    const overlay = new DrawingOverlay(a, { id: 'd' });
+    overlay.setDrawings([
+      { id: 'm-1', type: 'measure', points: [{ x: 0, y: 1 }, { x: 60, y: 2 }] },
+    ]);
+    const before = overlay.getDrawings();
+    overlay.setBarSeconds(60);
+    expect(overlay.getBarSeconds()).toBe(60);
+    expect(overlay.getDrawings()).toEqual(before); // no structural mutation
+    // non-positive / non-finite clears it back to unset
+    overlay.setBarSeconds(0);
+    expect(overlay.getBarSeconds()).toBe(null);
+    overlay.setBarSeconds(Number.NaN);
+    expect(overlay.getBarSeconds()).toBe(null);
+  });
+
+  it('finance shapes are select/drag/delete-able via the generic handle path', () => {
+    const a = fakeAdapter();
+    const overlay = new DrawingOverlay(a, { id: 'd' });
+    overlay.setDrawings([
+      { id: 'fib-1', type: 'fib', points: [{ x: 0, y: 0 }, { x: 100, y: 100 }] },
+    ]);
+    overlay.setTool('select');
+    // grab handle 1 (within 8px), drag it, release
+    overlay.onPointerDown(pe(100, 100));
+    expect(overlay.getSelectedId()).toBe('fib-1');
+    overlay.onPointerMove(pe(120, 90));
+    overlay.onPointerUp(pe(120, 90));
+    expect(overlay.getDrawings()[0]!.points[1]).toEqual({ x: 120, y: 90 });
+    overlay.deleteSelected();
+    expect(overlay.getDrawings()).toHaveLength(0);
   });
 });
