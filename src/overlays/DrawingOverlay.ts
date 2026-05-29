@@ -155,6 +155,8 @@ export class DrawingOverlay extends Layer {
   private selectedId: string | null = null;
   /** Handle currently dragged: index into the selected drawing's points. */
   private dragPointIndex: number | null = null;
+  /** While dragging a whole drawing by its body, the previous pointer data point. */
+  private dragWholeLast: { x: number; y: number } | null = null;
   /** Handle currently hovered (for highlight), as (drawingId, pointIndex). */
   private hoverHandle: { id: string; index: number } | null = null;
 
@@ -586,7 +588,7 @@ export class DrawingOverlay extends Layer {
     if (isRightClick) return; // right-click is meaningless for non-polygon shapes
 
     const type = this.tool;
-    const data = this.adapter.toData(e.x, e.y);
+    const data = this.toDataSafe(e);
     if (this.inProgressType === null) this.inProgressType = type;
     this.inProgress.push({ x: data.x, y: data.y });
 
@@ -617,10 +619,27 @@ export class DrawingOverlay extends Layer {
     if (this.dragPointIndex !== null && this.selectedId !== null) {
       const sel = this.drawings.find((d) => d.id === this.selectedId);
       if (sel) {
-        const data = this.adapter.toData(e.x, e.y);
+        const data = this.toDataSafe(e);
         sel.points[this.dragPointIndex] = { x: data.x, y: data.y };
         this.emitChange();
         this.adapter.invalidate();
+      }
+      return;
+    }
+
+    // Body grab → translate the whole drawing by the pointer's data delta.
+    if (this.dragWholeLast !== null && this.selectedId !== null) {
+      const sel = this.drawings.find((d) => d.id === this.selectedId);
+      if (sel) {
+        const cur = this.toDataSafe(e);
+        const dx = cur.x - this.dragWholeLast.x;
+        const dy = cur.y - this.dragWholeLast.y;
+        if (dx !== 0 || dy !== 0) {
+          sel.points = sel.points.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+          this.dragWholeLast = cur;
+          this.emitChange();
+          this.adapter.invalidate();
+        }
       }
       return;
     }
@@ -642,6 +661,29 @@ export class DrawingOverlay extends Layer {
 
   onPointerUp(_e: LayerPointerEvent): void {
     this.dragPointIndex = null;
+    this.dragWholeLast = null;
+  }
+
+  /**
+   * Pointer → data, but if the time axis can't map the pixel (a click in the
+   * empty/future area right of the last bar, where TV's coordinateToTime is
+   * null), snap x to a clamped time interpolated from the visible domain so the
+   * point is still finite + reprojectable (otherwise it would never render).
+   */
+  private toDataSafe(e: LayerPointerEvent): { x: number; y: number } {
+    const d = this.adapter.toData(e.x, e.y);
+    if (!Number.isFinite(d.x)) {
+      const dom = this.adapter.getViewport()?.xDomain;
+      let w = 0;
+      try { w = this.adapter.getCanvas().getBoundingClientRect().width || this.adapter.getCanvas().width; } catch { w = 0; }
+      if (dom && Number.isFinite(dom[0]) && Number.isFinite(dom[1]) && w > 0) {
+        const lo = Math.min(dom[0], dom[1]);
+        const hi = Math.max(dom[0], dom[1]);
+        const t = dom[0] + (e.x / w) * (dom[1] - dom[0]);
+        d.x = Math.min(Math.max(t, lo), hi);
+      }
+    }
+    return d;
   }
 
   // -- select / hit-testing -------------------------------------------------
@@ -659,6 +701,8 @@ export class DrawingOverlay extends Layer {
     const body = this.hitBody(e.x, e.y);
     if (body) {
       this.setSelected(body);
+      // Start a whole-drawing move (left-click + drag the body).
+      this.dragWholeLast = this.toDataSafe(e);
       this.adapter.invalidate();
       return;
     }

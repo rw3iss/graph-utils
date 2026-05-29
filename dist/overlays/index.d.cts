@@ -444,6 +444,8 @@ declare class DrawingOverlay extends Layer {
     private selectedId;
     /** Handle currently dragged: index into the selected drawing's points. */
     private dragPointIndex;
+    /** While dragging a whole drawing by its body, the previous pointer data point. */
+    private dragWholeLast;
     /** Handle currently hovered (for highlight), as (drawingId, pointIndex). */
     private hoverHandle;
     /** Bar interval (seconds) for 'measure' Δbars; unset → measure omits Δbars. */
@@ -491,6 +493,13 @@ declare class DrawingOverlay extends Layer {
     onPointerDown(e: LayerPointerEvent): void;
     onPointerMove(e: LayerPointerEvent): void;
     onPointerUp(_e: LayerPointerEvent): void;
+    /**
+     * Pointer → data, but if the time axis can't map the pixel (a click in the
+     * empty/future area right of the last bar, where TV's coordinateToTime is
+     * null), snap x to a clamped time interpolated from the visible domain so the
+     * point is still finite + reprojectable (otherwise it would never render).
+     */
+    private toDataSafe;
     private handleSelectDown;
     /** Topmost drawing whose handle is within HANDLE_HIT_PX of (px,py). */
     private hitHandle;
