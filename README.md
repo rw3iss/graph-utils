@@ -130,7 +130,7 @@ new Crosshair(adapter, { id: 'x' }).attach(tv.chartElement());
 
 | Export                              | Purpose                                       |
 | ----------------------------------- | --------------------------------------------- |
-| `Adapter`                           | Contract: `getCanvas / getViewport / addLayer / invalidate / toPixel / toData`. |
+| `Adapter`                           | Contract: `getCanvas / getViewport / addLayer / invalidate / toPixel / toData`, plus optional `setInteractive(on) / getInteractive()` for pointer dispatch. |
 | `VanillaChartAdapter(chart)`        | Wraps our `Chart`.                            |
 | `TradingViewOverlayAdapter(opts)`   | Wraps an `IChartApi` from `lightweight-charts`. |
 
@@ -146,6 +146,7 @@ new Crosshair(adapter, { id: 'x' }).attach(tv.chartElement());
 | `BollingerBands`                    | Rolling SMA + std-dev bands.                  |
 | `VWAP`                              | Cumulative volume-weighted average price.     |
 | `Crosshair`                         | Vertical + horizontal tracker w/ readout.     |
+| `DrawingOverlay`                    | Interactive line / polygon / rect annotations, data-anchored + draggable. |
 
 ## Architecture
 
@@ -226,6 +227,62 @@ The constraints:
 - Use `adapter.toPixel(...)`; never assume how the host maps coords.
 - Skip points whose pixel is `NaN` (TV returns null outside the visible
   range; the adapter forwards that as NaN).
+
+## Interactive drawing
+
+`DrawingOverlay` lets the user draw data-anchored annotations (line,
+polygon, rect) that pan and zoom with the chart — every point is stored
+in **data space** and re-projected through `adapter.toPixel` each frame.
+
+```ts
+import { TradingViewOverlayAdapter } from '@rw3iss/graph-utils/adapters';
+import { DrawingOverlay } from '@rw3iss/graph-utils/overlays';
+
+const adapter = new TradingViewOverlayAdapter({ chart: tv, priceSeries: series });
+const draw = new DrawingOverlay(adapter, { id: 'draw' });
+adapter.addLayer(draw);
+
+// Toolbar wiring
+toolbarLineBtn.onclick    = () => draw.setTool('line');
+toolbarPolyBtn.onclick    = () => draw.setTool('polygon'); // right-click finalizes
+toolbarRectBtn.onclick    = () => draw.setTool('rect');
+toolbarSelectBtn.onclick  = () => draw.setTool('select');  // drag handles / move
+toolbarPanBtn.onclick     = () => draw.setTool(null);      // back to chart pan/zoom
+
+// Persistence: save on every mutation, restore on load.
+draw.on('change', (drawings) => localStorage.setItem('annotations', JSON.stringify(drawings)));
+draw.setDrawings(JSON.parse(localStorage.getItem('annotations') ?? '[]'));
+
+// Flip the toolbar back to pan/select after a shape completes.
+draw.on('toolidle', () => draw.setTool('select'));
+
+// The host owns the keyboard. Wire Esc / Delete yourself:
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') draw.cancelInProgress();
+  if (e.key === 'Delete' || e.key === 'Backspace') draw.deleteSelected();
+});
+```
+
+How it interacts with the host:
+
+- When a tool is set (any shape **or** `'select'`), the overlay calls
+  `adapter.setInteractive(true)` — the adapter flips its canvas to
+  `pointer-events: auto` and forwards pointer events to layers'
+  `onPointerDown/Move/Up`, **topmost (highest `zIndex`) first**.
+- When the tool is `null`, it calls `adapter.setInteractive(false)` —
+  the canvas goes back to `pointer-events: none`, so **TradingView's own
+  pan/zoom works unchanged**. The overlay layer keeps drawing; it just
+  stops capturing the pointer.
+- Right-click (`button === 2`) finalizes a polygon. The adapter
+  `preventDefault`s `contextmenu` so the browser menu never pops; the
+  drawing overlay reads the `button === 2` pointerdown that fires
+  alongside.
+
+Public API: `setTool / getTool`, `getDrawings / setDrawings`, `clear`,
+`deleteSelected`, `setStyle / getStyle`, `cancelInProgress`,
+`getSelectedId`, and `on('change' | 'toolidle', cb) → unsubscribe`. The
+`Drawing` shape is `{ id, type: 'line'|'polygon'|'rect', points:
+{x,y}[], style? }` where `x` is the adapter time unit and `y` is price.
 
 ## Playground
 

@@ -1,4 +1,4 @@
-import { A as Adapter } from '../Adapter-CLrtO1Ut.js';
+import { A as Adapter } from '../Adapter-ZnF_DZ4J.js';
 import { C as Chart } from '../Chart-D1pen8_K.js';
 import { L as Layer } from '../Layer-bpSd4x2u.js';
 import { V as Viewport, S as Scale, C as CanvasContext } from '../Viewport-BadA7-mq.js';
@@ -7,11 +7,20 @@ import { V as Viewport, S as Scale, C as CanvasContext } from '../Viewport-BadA7
  * VanillaChartAdapter
  *
  * Wraps a Chart so overlays consume the same Adapter contract whether the
- * host is our own Chart or (v0.2) a TradingView pane.
+ * host is our own Chart or a TradingView pane.
+ *
+ * Interaction: the Chart's canvas is already pointer-interactive (it owns
+ * pan/zoom via `attachInteractions`). `setInteractive(true)` attaches an
+ * extra listener set that forwards `pointerdown/move/up` to the chart's
+ * layers' `onPointerDown/Move/Up` handlers (topmost zIndex first), and
+ * `contextmenu` is suppressed so a right-click can finalize a polygon. The
+ * canvas stays pointer-interactive either way, so pan/zoom is unaffected.
  */
 
 declare class VanillaChartAdapter implements Adapter {
     readonly chart: Chart;
+    private interactive;
+    private pointerListeners;
     constructor(chart: Chart);
     getCanvas(): HTMLCanvasElement;
     getViewport(): Viewport;
@@ -26,6 +35,11 @@ declare class VanillaChartAdapter implements Adapter {
         x: number;
         y: number;
     };
+    setInteractive(on: boolean): void;
+    getInteractive(): boolean;
+    private attachPointerListeners;
+    private detachPointerListeners;
+    private dispatchPointer;
 }
 
 /**
@@ -125,6 +139,8 @@ declare class TradingViewOverlayAdapter implements Adapter {
     private timeUnit;
     private onLogical;
     private onCrosshair;
+    private interactive;
+    private pointerListeners;
     constructor(options: TradingViewOverlayAdapterOptions);
     getCanvas(): HTMLCanvasElement;
     getViewport(): Viewport;
@@ -144,9 +160,26 @@ declare class TradingViewOverlayAdapter implements Adapter {
         x: number;
         y: number;
     };
+    /**
+     * Toggle pointer interaction. The overlay canvas is `pointer-events: none`
+     * by default so TV keeps pan/zoom. Turning interaction on flips it to
+     * `'auto'` and attaches pointer listeners that dispatch to layers'
+     * `onPointerDown/Move/Up`; turning it off restores `'none'` and detaches.
+     * Idempotent.
+     */
+    setInteractive(on: boolean): void;
+    getInteractive(): boolean;
     /** Synchronously draw all visible layers. Mostly internal — prefer `invalidate()`. */
     render(): void;
     destroy(): void;
+    private attachPointerListeners;
+    private detachPointerListeners;
+    /**
+     * Translate a DOM pointer event into a `LayerPointerEvent` (canvas-local
+     * CSS pixels) and dispatch to layers implementing the matching handler,
+     * topmost (highest zIndex) first.
+     */
+    private dispatchPointer;
     private handleResize;
     private syncViewportDomain;
 }

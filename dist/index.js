@@ -1058,6 +1058,8 @@ function shareAxes(viewports) {
 // src/adapters/VanillaChartAdapter.ts
 var VanillaChartAdapter = class {
   chart;
+  interactive = false;
+  pointerListeners = [];
   constructor(chart) {
     this.chart = chart;
   }
@@ -1081,6 +1083,56 @@ var VanillaChartAdapter = class {
   }
   toData(px, py) {
     return { x: this.chart.xScale.invert(px), y: this.chart.yScale.invert(py) };
+  }
+  setInteractive(on) {
+    if (on === this.interactive) return;
+    this.interactive = on;
+    if (on) this.attachPointerListeners();
+    else this.detachPointerListeners();
+  }
+  getInteractive() {
+    return this.interactive;
+  }
+  // -- private --------------------------------------------------------------
+  attachPointerListeners() {
+    if (this.pointerListeners.length) return;
+    const canvas = this.chart.canvas;
+    const down = (ev) => this.dispatchPointer("down", ev);
+    const move = (ev) => this.dispatchPointer("move", ev);
+    const up = (ev) => this.dispatchPointer("up", ev);
+    const cancel = (ev) => this.dispatchPointer("up", ev);
+    const ctx = (ev) => ev.preventDefault();
+    const add = (type, fn) => {
+      canvas.addEventListener(type, fn);
+      this.pointerListeners.push({ type, fn });
+    };
+    add("pointerdown", down);
+    add("pointermove", move);
+    add("pointerup", up);
+    add("pointercancel", cancel);
+    add("contextmenu", ctx);
+  }
+  detachPointerListeners() {
+    const canvas = this.chart.canvas;
+    for (const { type, fn } of this.pointerListeners) {
+      canvas.removeEventListener(type, fn);
+    }
+    this.pointerListeners = [];
+  }
+  dispatchPointer(kind, ev) {
+    const rect = this.chart.canvas.getBoundingClientRect();
+    const le = {
+      x: ev.clientX - rect.left,
+      y: ev.clientY - rect.top,
+      source: ev
+    };
+    const layers = this.chart.getLayers();
+    for (let i = layers.length - 1; i >= 0; i--) {
+      const l = layers[i];
+      if (!l.visible) continue;
+      const handler = kind === "down" ? l.onPointerDown : kind === "move" ? l.onPointerMove : l.onPointerUp;
+      if (handler) handler.call(l, le);
+    }
   }
 };
 
@@ -1176,6 +1228,8 @@ var TradingViewOverlayAdapter = class {
   timeUnit;
   onLogical;
   onCrosshair = null;
+  interactive = false;
+  pointerListeners = [];
   constructor(options) {
     this.tvChart = options.chart;
     this.priceSeries = options.priceSeries;
@@ -1254,6 +1308,27 @@ var TradingViewOverlayAdapter = class {
   toData(px, py) {
     return { x: this.xScale.invert(px), y: this.yScale.invert(py) };
   }
+  /**
+   * Toggle pointer interaction. The overlay canvas is `pointer-events: none`
+   * by default so TV keeps pan/zoom. Turning interaction on flips it to
+   * `'auto'` and attaches pointer listeners that dispatch to layers'
+   * `onPointerDown/Move/Up`; turning it off restores `'none'` and detaches.
+   * Idempotent.
+   */
+  setInteractive(on) {
+    if (on === this.interactive) return;
+    this.interactive = on;
+    if (on) {
+      this.canvas.style.pointerEvents = "auto";
+      this.attachPointerListeners();
+    } else {
+      this.canvas.style.pointerEvents = "none";
+      this.detachPointerListeners();
+    }
+  }
+  getInteractive() {
+    return this.interactive;
+  }
   /** Synchronously draw all visible layers. Mostly internal — prefer `invalidate()`. */
   render() {
     if (this.destroyed) return;
@@ -1265,6 +1340,7 @@ var TradingViewOverlayAdapter = class {
   }
   destroy() {
     this.destroyed = true;
+    this.detachPointerListeners();
     if (this.rafHandle !== null && typeof cancelAnimationFrame !== "undefined") {
       cancelAnimationFrame(this.rafHandle);
       this.rafHandle = null;
@@ -1281,6 +1357,48 @@ var TradingViewOverlayAdapter = class {
     this.viewport.bus.clear();
   }
   // -- private --------------------------------------------------------------
+  attachPointerListeners() {
+    if (this.pointerListeners.length) return;
+    const down = (ev) => this.dispatchPointer("down", ev);
+    const move = (ev) => this.dispatchPointer("move", ev);
+    const up = (ev) => this.dispatchPointer("up", ev);
+    const cancel = (ev) => this.dispatchPointer("up", ev);
+    const ctx = (ev) => ev.preventDefault();
+    const add = (type, fn) => {
+      this.canvas.addEventListener(type, fn);
+      this.pointerListeners.push({ type, fn });
+    };
+    add("pointerdown", down);
+    add("pointermove", move);
+    add("pointerup", up);
+    add("pointercancel", cancel);
+    add("contextmenu", ctx);
+  }
+  detachPointerListeners() {
+    for (const { type, fn } of this.pointerListeners) {
+      this.canvas.removeEventListener(type, fn);
+    }
+    this.pointerListeners = [];
+  }
+  /**
+   * Translate a DOM pointer event into a `LayerPointerEvent` (canvas-local
+   * CSS pixels) and dispatch to layers implementing the matching handler,
+   * topmost (highest zIndex) first.
+   */
+  dispatchPointer(kind, ev) {
+    const rect = this.canvas.getBoundingClientRect();
+    const le = {
+      x: ev.clientX - rect.left,
+      y: ev.clientY - rect.top,
+      source: ev
+    };
+    for (let i = this.layers.length - 1; i >= 0; i--) {
+      const l = this.layers[i];
+      if (!l.visible) continue;
+      const handler = kind === "down" ? l.onPointerDown : kind === "move" ? l.onPointerMove : l.onPointerUp;
+      if (handler) handler.call(l, le);
+    }
+  }
   handleResize() {
     const rect = this.chartElement.getBoundingClientRect();
     const w = rect.width;
@@ -1804,6 +1922,387 @@ function approxTextWidth(text, font) {
   return text.length * px * 0.55;
 }
 
-export { AxisLayer, BollingerBands, CanvasContext, Chart, Crosshair, EventBus, GridLayer, HitTester, Layer, LinearScale, LogScale, OrderMarkers, OverlayBase, PriceLine, SignalArrows, ThresholdBand, TimeScale, TradingViewOverlayAdapter, VWAP, VanillaChartAdapter, Viewport, ZoneBoxes, attachInteractions, clearRect, computeBands, computeVWAP, createLinearGradient, drawCircle, drawLine, drawPath, drawPolyline, drawRect, drawText, niceLinearTicks, niceTimeTicks, shareAxes, shareXAxis, shareYAxis };
+// src/overlays/DrawingOverlay.ts
+var DEFAULT_STROKE = "#facc15";
+var DEFAULT_FILL = "rgba(250,204,21,0.12)";
+var DEFAULT_LINE_WIDTH = 1.5;
+var HANDLE_RADIUS = 4;
+var HANDLE_HIT_PX = 8;
+var BODY_HIT_PX = 6;
+var idCounter = 0;
+var DrawingOverlay = class extends Layer {
+  adapter;
+  bus = new EventBus();
+  drawings = [];
+  tool = null;
+  style = {};
+  /** Points of the shape currently being placed (data space). */
+  inProgress = [];
+  inProgressType = null;
+  /** Live cursor pixel for the rubber-band segment. */
+  cursorPx = null;
+  selectedId = null;
+  /** Handle currently dragged: index into the selected drawing's points. */
+  dragPointIndex = null;
+  /** Handle currently hovered (for highlight), as (drawingId, pointIndex). */
+  hoverHandle = null;
+  constructor(adapter, opts = {}) {
+    super(opts.id ?? "drawings");
+    this.adapter = adapter;
+    this.zIndex = opts.zIndex ?? 50;
+    this.visible = opts.visible ?? true;
+  }
+  // -- public API -----------------------------------------------------------
+  setTool(tool) {
+    this.clearInProgress();
+    this.tool = tool;
+    if (tool === null) {
+      this.adapter.setInteractive?.(false);
+    } else {
+      this.adapter.setInteractive?.(true);
+    }
+    if (tool !== "select") this.setSelected(null);
+    this.adapter.invalidate();
+  }
+  getTool() {
+    return this.tool;
+  }
+  /** Deep copy of all drawings (safe to hand to a persistence layer). */
+  getDrawings() {
+    return this.drawings.map(cloneDrawing);
+  }
+  /** Replace all drawings (persistence restore). Emits 'change'. */
+  setDrawings(d) {
+    this.drawings = d.map(cloneDrawing);
+    this.setSelected(null);
+    this.clearInProgress();
+    this.emitChange();
+    this.adapter.invalidate();
+  }
+  clear() {
+    if (this.drawings.length === 0 && this.inProgress.length === 0) {
+      this.adapter.invalidate();
+      return;
+    }
+    this.drawings = [];
+    this.setSelected(null);
+    this.clearInProgress();
+    this.emitChange();
+    this.adapter.invalidate();
+  }
+  deleteSelected() {
+    if (this.selectedId === null) return;
+    const before = this.drawings.length;
+    this.drawings = this.drawings.filter((d) => d.id !== this.selectedId);
+    this.setSelected(null);
+    if (this.drawings.length !== before) this.emitChange();
+    this.adapter.invalidate();
+  }
+  /** Style applied to new shapes and to the current selection. */
+  setStyle(s) {
+    this.style = { ...this.style, ...s };
+    if (this.selectedId !== null) {
+      const sel = this.drawings.find((d) => d.id === this.selectedId);
+      if (sel) {
+        sel.style = { ...sel.style, ...s };
+        this.emitChange();
+      }
+    }
+    this.adapter.invalidate();
+  }
+  getStyle() {
+    return { ...this.style };
+  }
+  /** Subscribe to a drawing event. Returns an unsubscribe fn. */
+  on(event, cb) {
+    return this.bus.on(event, cb);
+  }
+  /** Cancel the in-progress shape (host wires this to Esc). */
+  cancelInProgress() {
+    if (this.inProgress.length === 0 && this.cursorPx === null) return;
+    this.clearInProgress();
+    this.adapter.invalidate();
+  }
+  /** Currently selected drawing id, or null. */
+  getSelectedId() {
+    return this.selectedId;
+  }
+  // -- drawing --------------------------------------------------------------
+  draw(ctx, _vp) {
+    for (const d of this.drawings) {
+      this.drawShape(ctx, d, d.id === this.selectedId);
+    }
+    this.drawInProgress(ctx);
+  }
+  drawShape(ctx, d, selected) {
+    const stroke = d.style?.stroke ?? DEFAULT_STROKE;
+    const fill = d.style?.fill ?? DEFAULT_FILL;
+    const lineWidth = d.style?.lineWidth ?? DEFAULT_LINE_WIDTH;
+    const pts = d.points.map((p) => this.adapter.toPixel(p.x, p.y));
+    if (d.type === "line") {
+      const a = pts[0];
+      const b = pts[1];
+      if (a && b && isFinitePt(a) && isFinitePt(b)) {
+        ctx.line(a.x, a.y, b.x, b.y, { stroke, lineWidth });
+      }
+    } else if (d.type === "rect") {
+      const a = pts[0];
+      const b = pts[1];
+      if (a && b && isFinitePt(a) && isFinitePt(b)) {
+        const x = Math.min(a.x, b.x);
+        const y = Math.min(a.y, b.y);
+        const w = Math.abs(b.x - a.x);
+        const h = Math.abs(b.y - a.y);
+        ctx.rect(x, y, w, h, { stroke, fill, lineWidth });
+      }
+    } else {
+      const finite = pts.filter(isFinitePt);
+      if (finite.length >= 3) {
+        ctx.path(
+          (c) => {
+            c.moveTo(finite[0].x, finite[0].y);
+            for (let i = 1; i < finite.length; i++) c.lineTo(finite[i].x, finite[i].y);
+            c.closePath();
+          },
+          { stroke, fill, lineWidth }
+        );
+      } else if (finite.length === 2) {
+        ctx.line(finite[0].x, finite[0].y, finite[1].x, finite[1].y, { stroke, lineWidth });
+      }
+    }
+    const showHandles = selected || this.hoverHandle?.id === d.id;
+    if (showHandles) {
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+        if (!isFinitePt(p)) continue;
+        const hot = this.dragPointIndex === i && this.selectedId === d.id || this.hoverHandle?.id === d.id && this.hoverHandle.index === i;
+        ctx.circle(p.x, p.y, hot ? HANDLE_RADIUS + 2 : HANDLE_RADIUS, {
+          fill: hot ? "#fff" : stroke,
+          stroke,
+          lineWidth: 1
+        });
+      }
+    }
+  }
+  drawInProgress(ctx) {
+    if (this.inProgress.length === 0 || this.inProgressType === null) return;
+    const stroke = this.style.stroke ?? DEFAULT_STROKE;
+    const fill = this.style.fill ?? DEFAULT_FILL;
+    const lineWidth = this.style.lineWidth ?? DEFAULT_LINE_WIDTH;
+    const pts = this.inProgress.map((p) => this.adapter.toPixel(p.x, p.y));
+    if (this.inProgressType === "rect") {
+      const a = pts[0];
+      const b = this.cursorPx ?? pts[1] ?? null;
+      if (a && b && isFinitePt(a) && isFinitePt(b)) {
+        const x = Math.min(a.x, b.x);
+        const y = Math.min(a.y, b.y);
+        ctx.rect(x, y, Math.abs(b.x - a.x), Math.abs(b.y - a.y), { stroke, fill, lineWidth });
+      }
+    } else {
+      for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1];
+        const b = pts[i];
+        if (isFinitePt(a) && isFinitePt(b)) ctx.line(a.x, a.y, b.x, b.y, { stroke, lineWidth });
+      }
+      const last = pts[pts.length - 1];
+      if (last && isFinitePt(last) && this.cursorPx) {
+        ctx.line(last.x, last.y, this.cursorPx.x, this.cursorPx.y, {
+          stroke,
+          lineWidth,
+          lineDash: [4, 4]
+        });
+      }
+    }
+    for (const p of pts) {
+      if (isFinitePt(p)) ctx.circle(p.x, p.y, HANDLE_RADIUS, { fill: stroke });
+    }
+  }
+  // -- pointer handlers -----------------------------------------------------
+  onPointerDown(e) {
+    if (this.tool === null) return;
+    const isRightClick = e.source.button === 2;
+    if (this.tool === "select") {
+      this.handleSelectDown(e);
+      return;
+    }
+    if (this.tool === "polygon" && isRightClick) {
+      this.finalizePolygon();
+      return;
+    }
+    if (isRightClick) return;
+    const data = this.adapter.toData(e.x, e.y);
+    if (this.inProgressType === null) this.inProgressType = this.tool;
+    this.inProgress.push({ x: data.x, y: data.y });
+    if (this.tool === "line" && this.inProgress.length >= 2) {
+      this.finalizeShape("line", this.inProgress.slice(0, 2));
+    } else if (this.tool === "rect" && this.inProgress.length >= 2) {
+      this.finalizeShape("rect", this.inProgress.slice(0, 2));
+    }
+    this.adapter.invalidate();
+  }
+  onPointerMove(e) {
+    this.cursorPx = { x: e.x, y: e.y };
+    if (this.dragPointIndex !== null && this.selectedId !== null) {
+      const sel = this.drawings.find((d) => d.id === this.selectedId);
+      if (sel) {
+        const data = this.adapter.toData(e.x, e.y);
+        sel.points[this.dragPointIndex] = { x: data.x, y: data.y };
+        this.emitChange();
+        this.adapter.invalidate();
+      }
+      return;
+    }
+    if (this.tool === "select") {
+      const hit = this.hitHandle(e.x, e.y);
+      const changed = (hit?.id ?? null) !== (this.hoverHandle?.id ?? null) || (hit?.index ?? -1) !== (this.hoverHandle?.index ?? -1);
+      this.hoverHandle = hit;
+      if (changed) this.adapter.invalidate();
+      return;
+    }
+    if (this.inProgress.length > 0) this.adapter.invalidate();
+  }
+  onPointerUp(_e) {
+    this.dragPointIndex = null;
+  }
+  // -- select / hit-testing -------------------------------------------------
+  handleSelectDown(e) {
+    const handle = this.hitHandle(e.x, e.y);
+    if (handle) {
+      this.setSelected(handle.id);
+      this.dragPointIndex = handle.index;
+      this.adapter.invalidate();
+      return;
+    }
+    const body = this.hitBody(e.x, e.y);
+    if (body) {
+      this.setSelected(body);
+      this.adapter.invalidate();
+      return;
+    }
+    this.setSelected(null);
+    this.adapter.invalidate();
+  }
+  /** Topmost drawing whose handle is within HANDLE_HIT_PX of (px,py). */
+  hitHandle(px, py) {
+    for (let i = this.drawings.length - 1; i >= 0; i--) {
+      const d = this.drawings[i];
+      for (let j = 0; j < d.points.length; j++) {
+        const p = this.adapter.toPixel(d.points[j].x, d.points[j].y);
+        if (!isFinitePt(p)) continue;
+        if (dist(px, py, p.x, p.y) <= HANDLE_HIT_PX) return { id: d.id, index: j };
+      }
+    }
+    return null;
+  }
+  /** Topmost drawing whose body contains / is near (px,py). */
+  hitBody(px, py) {
+    for (let i = this.drawings.length - 1; i >= 0; i--) {
+      const d = this.drawings[i];
+      const pts = d.points.map((p) => this.adapter.toPixel(p.x, p.y)).filter(isFinitePt);
+      if (d.type === "line") {
+        if (pts.length === 2 && segDist(px, py, pts[0], pts[1]) <= BODY_HIT_PX) return d.id;
+      } else if (d.type === "rect") {
+        if (pts.length === 2) {
+          const x = Math.min(pts[0].x, pts[1].x);
+          const y = Math.min(pts[0].y, pts[1].y);
+          const w = Math.abs(pts[1].x - pts[0].x);
+          const h = Math.abs(pts[1].y - pts[0].y);
+          if (pointInRect(px, py, x, y, w, h, BODY_HIT_PX)) return d.id;
+        }
+      } else {
+        if (pts.length >= 3 && pointInPolygon(px, py, pts)) return d.id;
+        for (let k = 0; k < pts.length; k++) {
+          const a = pts[k];
+          const b = pts[(k + 1) % pts.length];
+          if (segDist(px, py, a, b) <= BODY_HIT_PX) return d.id;
+        }
+      }
+    }
+    return null;
+  }
+  // -- internals ------------------------------------------------------------
+  finalizeShape(type, points) {
+    const d = {
+      id: nextId(),
+      type,
+      points: points.map((p) => ({ x: p.x, y: p.y })),
+      style: { ...this.style }
+    };
+    this.drawings.push(d);
+    this.clearInProgress();
+    this.emitChange();
+    this.bus.emit("toolidle", type);
+    this.adapter.invalidate();
+  }
+  finalizePolygon() {
+    if (this.inProgress.length < 3) {
+      return;
+    }
+    this.finalizeShape("polygon", this.inProgress.slice());
+  }
+  clearInProgress() {
+    this.inProgress = [];
+    this.inProgressType = null;
+    this.cursorPx = null;
+  }
+  setSelected(id) {
+    this.selectedId = id;
+    this.dragPointIndex = null;
+    if (id === null) this.hoverHandle = null;
+  }
+  emitChange() {
+    this.bus.emit("change", this.getDrawings());
+  }
+};
+function isFinitePt(p) {
+  return Number.isFinite(p.x) && Number.isFinite(p.y);
+}
+function dist(ax, ay, bx, by) {
+  const dx = ax - bx;
+  const dy = ay - by;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+function segDist(px, py, a, b) {
+  const abx = b.x - a.x;
+  const aby = b.y - a.y;
+  const apx = px - a.x;
+  const apy = py - a.y;
+  const ab2 = abx * abx + aby * aby;
+  let t = ab2 === 0 ? 0 : (apx * abx + apy * aby) / ab2;
+  if (t < 0) t = 0;
+  else if (t > 1) t = 1;
+  const cx = a.x + abx * t;
+  const cy = a.y + aby * t;
+  return dist(px, py, cx, cy);
+}
+function pointInRect(px, py, x, y, w, h, tol) {
+  return px >= x - tol && px <= x + w + tol && py >= y - tol && py <= y + h + tol;
+}
+function pointInPolygon(px, py, pts) {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const xi = pts[i].x;
+    const yi = pts[i].y;
+    const xj = pts[j].x;
+    const yj = pts[j].y;
+    const intersect = yi > py !== yj > py && px < (xj - xi) * (py - yi) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+function cloneDrawing(d) {
+  return {
+    id: d.id,
+    type: d.type,
+    points: d.points.map((p) => ({ x: p.x, y: p.y })),
+    style: d.style ? { ...d.style } : void 0
+  };
+}
+function nextId() {
+  idCounter += 1;
+  return `draw-${idCounter}`;
+}
+
+export { AxisLayer, BollingerBands, CanvasContext, Chart, Crosshair, DrawingOverlay, EventBus, GridLayer, HitTester, Layer, LinearScale, LogScale, OrderMarkers, OverlayBase, PriceLine, SignalArrows, ThresholdBand, TimeScale, TradingViewOverlayAdapter, VWAP, VanillaChartAdapter, Viewport, ZoneBoxes, attachInteractions, clearRect, computeBands, computeVWAP, createLinearGradient, drawCircle, drawLine, drawPath, drawPolyline, drawRect, drawText, niceLinearTicks, niceTimeTicks, shareAxes, shareXAxis, shareYAxis };
 //# sourceMappingURL=index.js.map
 //# sourceMappingURL=index.js.map

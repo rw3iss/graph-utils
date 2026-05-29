@@ -3,6 +3,8 @@
 // src/adapters/VanillaChartAdapter.ts
 var VanillaChartAdapter = class {
   chart;
+  interactive = false;
+  pointerListeners = [];
   constructor(chart) {
     this.chart = chart;
   }
@@ -26,6 +28,56 @@ var VanillaChartAdapter = class {
   }
   toData(px, py) {
     return { x: this.chart.xScale.invert(px), y: this.chart.yScale.invert(py) };
+  }
+  setInteractive(on) {
+    if (on === this.interactive) return;
+    this.interactive = on;
+    if (on) this.attachPointerListeners();
+    else this.detachPointerListeners();
+  }
+  getInteractive() {
+    return this.interactive;
+  }
+  // -- private --------------------------------------------------------------
+  attachPointerListeners() {
+    if (this.pointerListeners.length) return;
+    const canvas = this.chart.canvas;
+    const down = (ev) => this.dispatchPointer("down", ev);
+    const move = (ev) => this.dispatchPointer("move", ev);
+    const up = (ev) => this.dispatchPointer("up", ev);
+    const cancel = (ev) => this.dispatchPointer("up", ev);
+    const ctx = (ev) => ev.preventDefault();
+    const add = (type, fn) => {
+      canvas.addEventListener(type, fn);
+      this.pointerListeners.push({ type, fn });
+    };
+    add("pointerdown", down);
+    add("pointermove", move);
+    add("pointerup", up);
+    add("pointercancel", cancel);
+    add("contextmenu", ctx);
+  }
+  detachPointerListeners() {
+    const canvas = this.chart.canvas;
+    for (const { type, fn } of this.pointerListeners) {
+      canvas.removeEventListener(type, fn);
+    }
+    this.pointerListeners = [];
+  }
+  dispatchPointer(kind, ev) {
+    const rect = this.chart.canvas.getBoundingClientRect();
+    const le = {
+      x: ev.clientX - rect.left,
+      y: ev.clientY - rect.top,
+      source: ev
+    };
+    const layers = this.chart.getLayers();
+    for (let i = layers.length - 1; i >= 0; i--) {
+      const l = layers[i];
+      if (!l.visible) continue;
+      const handler = kind === "down" ? l.onPointerDown : kind === "move" ? l.onPointerMove : l.onPointerUp;
+      if (handler) handler.call(l, le);
+    }
   }
 };
 
@@ -421,6 +473,8 @@ var TradingViewOverlayAdapter = class {
   timeUnit;
   onLogical;
   onCrosshair = null;
+  interactive = false;
+  pointerListeners = [];
   constructor(options) {
     this.tvChart = options.chart;
     this.priceSeries = options.priceSeries;
@@ -499,6 +553,27 @@ var TradingViewOverlayAdapter = class {
   toData(px, py) {
     return { x: this.xScale.invert(px), y: this.yScale.invert(py) };
   }
+  /**
+   * Toggle pointer interaction. The overlay canvas is `pointer-events: none`
+   * by default so TV keeps pan/zoom. Turning interaction on flips it to
+   * `'auto'` and attaches pointer listeners that dispatch to layers'
+   * `onPointerDown/Move/Up`; turning it off restores `'none'` and detaches.
+   * Idempotent.
+   */
+  setInteractive(on) {
+    if (on === this.interactive) return;
+    this.interactive = on;
+    if (on) {
+      this.canvas.style.pointerEvents = "auto";
+      this.attachPointerListeners();
+    } else {
+      this.canvas.style.pointerEvents = "none";
+      this.detachPointerListeners();
+    }
+  }
+  getInteractive() {
+    return this.interactive;
+  }
   /** Synchronously draw all visible layers. Mostly internal — prefer `invalidate()`. */
   render() {
     if (this.destroyed) return;
@@ -510,6 +585,7 @@ var TradingViewOverlayAdapter = class {
   }
   destroy() {
     this.destroyed = true;
+    this.detachPointerListeners();
     if (this.rafHandle !== null && typeof cancelAnimationFrame !== "undefined") {
       cancelAnimationFrame(this.rafHandle);
       this.rafHandle = null;
@@ -526,6 +602,48 @@ var TradingViewOverlayAdapter = class {
     this.viewport.bus.clear();
   }
   // -- private --------------------------------------------------------------
+  attachPointerListeners() {
+    if (this.pointerListeners.length) return;
+    const down = (ev) => this.dispatchPointer("down", ev);
+    const move = (ev) => this.dispatchPointer("move", ev);
+    const up = (ev) => this.dispatchPointer("up", ev);
+    const cancel = (ev) => this.dispatchPointer("up", ev);
+    const ctx = (ev) => ev.preventDefault();
+    const add = (type, fn) => {
+      this.canvas.addEventListener(type, fn);
+      this.pointerListeners.push({ type, fn });
+    };
+    add("pointerdown", down);
+    add("pointermove", move);
+    add("pointerup", up);
+    add("pointercancel", cancel);
+    add("contextmenu", ctx);
+  }
+  detachPointerListeners() {
+    for (const { type, fn } of this.pointerListeners) {
+      this.canvas.removeEventListener(type, fn);
+    }
+    this.pointerListeners = [];
+  }
+  /**
+   * Translate a DOM pointer event into a `LayerPointerEvent` (canvas-local
+   * CSS pixels) and dispatch to layers implementing the matching handler,
+   * topmost (highest zIndex) first.
+   */
+  dispatchPointer(kind, ev) {
+    const rect = this.canvas.getBoundingClientRect();
+    const le = {
+      x: ev.clientX - rect.left,
+      y: ev.clientY - rect.top,
+      source: ev
+    };
+    for (let i = this.layers.length - 1; i >= 0; i--) {
+      const l = this.layers[i];
+      if (!l.visible) continue;
+      const handler = kind === "down" ? l.onPointerDown : kind === "move" ? l.onPointerMove : l.onPointerUp;
+      if (handler) handler.call(l, le);
+    }
+  }
   handleResize() {
     const rect = this.chartElement.getBoundingClientRect();
     const w = rect.width;

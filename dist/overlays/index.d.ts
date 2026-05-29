@@ -1,6 +1,6 @@
-import { L as Layer } from '../Layer-bpSd4x2u.js';
-import { C as CanvasContext, V as Viewport } from '../Viewport-BadA7-mq.js';
-import { A as Adapter } from '../Adapter-CLrtO1Ut.js';
+import { L as Layer, a as LayerPointerEvent } from '../Layer-bpSd4x2u.js';
+import { C as CanvasContext, V as Viewport, E as EventBus } from '../Viewport-BadA7-mq.js';
+import { A as Adapter } from '../Adapter-ZnF_DZ4J.js';
 
 /**
  * OverlayBase
@@ -351,4 +351,116 @@ declare class Crosshair extends OverlayBase<null> {
     draw(ctx: CanvasContext, _vp: Viewport): void;
 }
 
-export { BollingerBands, type BollingerBandsOptions, type BollingerSample, Crosshair, type CrosshairOptions, type Order, OrderMarkers, type OrderMarkersOptions, OverlayBase, type OverlayOptions, PriceLine, type PriceLineOptions, type PriceLineSpec, type Signal, SignalArrows, type SignalArrowsOptions, ThresholdBand, type ThresholdBandOptions, type ThresholdBandSpec, VWAP, type VWAPOptions, type VWAPSample, type Zone, ZoneBoxes, type ZoneBoxesOptions, computeBands, computeVWAP };
+/**
+ * DrawingOverlay
+ *
+ * Interactive, data-anchored annotations (line / polygon / rect) that the
+ * user draws on top of a chart and that scale + pan with the chart because
+ * every point is stored in DATA space and mapped through `adapter.toPixel`
+ * at draw time.
+ *
+ * It is a `Layer` added via `adapter.addLayer(...)`. Unlike the marker
+ * overlays it owns its own data model (an array of `Drawing`s), a current
+ * `DrawingTool`, an in-progress shape, and a tiny `EventBus` so the host
+ * app can persist on `'change'` and flip its toolbar on `'toolidle'`.
+ *
+ * Interaction is gated through `adapter.setInteractive(on)`: when a tool is
+ * selected the adapter forwards DOM pointer events to this layer's
+ * `onPointerDown/Move/Up`; when the tool is cleared interaction is turned
+ * off so the host chart keeps its own pan/zoom gestures.
+ *
+ * Coordinate contract (mirrors the rest of the package):
+ *   - `DrawingPoint.x` is the adapter's time unit (TV: seconds by default).
+ *   - `DrawingPoint.y` is price.
+ *   - Points whose `toPixel` is non-finite (off the visible range on TV)
+ *     are skipped; multi-point shapes still draw their finite sub-segments.
+ *
+ * Right-click finalizes a polygon: the adapter suppresses the browser
+ * context menu and the `pointerdown` with `button === 2` is the signal we
+ * read in `onPointerDown`.
+ */
+
+type DrawingType = 'line' | 'polygon' | 'rect';
+interface DrawingPoint {
+    /** Adapter time unit (e.g. TV seconds). */
+    x: number;
+    /** Price. */
+    y: number;
+}
+interface DrawingStyle {
+    stroke?: string;
+    fill?: string;
+    lineWidth?: number;
+}
+interface Drawing {
+    id: string;
+    type: DrawingType;
+    points: DrawingPoint[];
+    style?: DrawingStyle;
+}
+/** A shape tool, the 'select'/move tool, or no tool (idle / pan). */
+type DrawingTool = DrawingType | 'select' | null;
+interface DrawingOverlayOptions {
+    id?: string;
+    zIndex?: number;
+    visible?: boolean;
+}
+type DrawingEvents = {
+    /** Fired whenever the drawings array mutates (add / move / delete / restore). */
+    change: Drawing[];
+    /** Fired when a shape finishes placing, carrying the finished type. */
+    toolidle: DrawingType;
+};
+declare class DrawingOverlay extends Layer {
+    protected adapter: Adapter;
+    readonly bus: EventBus<DrawingEvents>;
+    private drawings;
+    private tool;
+    private style;
+    /** Points of the shape currently being placed (data space). */
+    private inProgress;
+    private inProgressType;
+    /** Live cursor pixel for the rubber-band segment. */
+    private cursorPx;
+    private selectedId;
+    /** Handle currently dragged: index into the selected drawing's points. */
+    private dragPointIndex;
+    /** Handle currently hovered (for highlight), as (drawingId, pointIndex). */
+    private hoverHandle;
+    constructor(adapter: Adapter, opts?: DrawingOverlayOptions);
+    setTool(tool: DrawingTool): void;
+    getTool(): DrawingTool;
+    /** Deep copy of all drawings (safe to hand to a persistence layer). */
+    getDrawings(): Drawing[];
+    /** Replace all drawings (persistence restore). Emits 'change'. */
+    setDrawings(d: Drawing[]): void;
+    clear(): void;
+    deleteSelected(): void;
+    /** Style applied to new shapes and to the current selection. */
+    setStyle(s: DrawingStyle): void;
+    getStyle(): DrawingStyle;
+    /** Subscribe to a drawing event. Returns an unsubscribe fn. */
+    on<K extends keyof DrawingEvents>(event: K, cb: (payload: DrawingEvents[K]) => void): () => void;
+    /** Cancel the in-progress shape (host wires this to Esc). */
+    cancelInProgress(): void;
+    /** Currently selected drawing id, or null. */
+    getSelectedId(): string | null;
+    draw(ctx: CanvasContext, _vp: Viewport): void;
+    private drawShape;
+    private drawInProgress;
+    onPointerDown(e: LayerPointerEvent): void;
+    onPointerMove(e: LayerPointerEvent): void;
+    onPointerUp(_e: LayerPointerEvent): void;
+    private handleSelectDown;
+    /** Topmost drawing whose handle is within HANDLE_HIT_PX of (px,py). */
+    private hitHandle;
+    /** Topmost drawing whose body contains / is near (px,py). */
+    private hitBody;
+    private finalizeShape;
+    private finalizePolygon;
+    private clearInProgress;
+    private setSelected;
+    private emitChange;
+}
+
+export { BollingerBands, type BollingerBandsOptions, type BollingerSample, Crosshair, type CrosshairOptions, type Drawing, DrawingOverlay, type DrawingOverlayOptions, type DrawingPoint, type DrawingStyle, type DrawingTool, type DrawingType, type Order, OrderMarkers, type OrderMarkersOptions, OverlayBase, type OverlayOptions, PriceLine, type PriceLineOptions, type PriceLineSpec, type Signal, SignalArrows, type SignalArrowsOptions, ThresholdBand, type ThresholdBandOptions, type ThresholdBandSpec, VWAP, type VWAPOptions, type VWAPSample, type Zone, ZoneBoxes, type ZoneBoxesOptions, computeBands, computeVWAP };

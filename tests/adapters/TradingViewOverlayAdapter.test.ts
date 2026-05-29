@@ -16,7 +16,7 @@ import {
   type TradingViewLogicalRange,
   type TradingViewTimeRange,
 } from '../../src/adapters/TradingViewOverlayAdapter.js';
-import { Layer } from '../../src/chart/Layer.js';
+import { Layer, type LayerPointerEvent } from '../../src/chart/Layer.js';
 import type { CanvasContext } from '../../src/core/CanvasContext.js';
 import type { Viewport } from '../../src/core/Viewport.js';
 
@@ -286,6 +286,69 @@ describe('TradingViewOverlayAdapter', () => {
     // xScale lives on adapter, so verify it works inside the layer view.
     const xMid = adapter.xScale.scale(1500);
     expect(xMid).toBeCloseTo(200, 6);
+    adapter.destroy();
+  });
+
+  it('setInteractive toggles pointer-events and dispatches to layers topmost-first', () => {
+    const { chart, series, element } = mockTradingView({
+      timeRange: [1000, 2000],
+      timePixels: [0, 400],
+      priceRange: [0, 100],
+      pricePixels: [200, 0],
+    });
+    const container = document.createElement('div');
+    container.appendChild(element);
+    document.body.appendChild(container);
+    const adapter = new TradingViewOverlayAdapter({ chart, priceSeries: series });
+    // Overlay canvas reports a known rect so client→canvas math is exact.
+    const canvas = adapter.getCanvas();
+    canvas.getBoundingClientRect = () =>
+      ({ left: 5, top: 7, right: 405, bottom: 207, width: 400, height: 200, x: 5, y: 7, toJSON: () => ({}) }) as DOMRect;
+
+    expect(adapter.getInteractive?.()).toBe(false);
+    expect(canvas.style.pointerEvents).toBe('none');
+
+    const order: string[] = [];
+    const seenDown: LayerPointerEvent[] = [];
+    class Probe extends Layer {
+      constructor(id: string, z: number) {
+        super(id);
+        this.zIndex = z;
+      }
+      draw(): void {}
+      onPointerDown(e: LayerPointerEvent): void {
+        order.push(this.id);
+        seenDown.push(e);
+      }
+    }
+    adapter.addLayer(new Probe('back', 0));
+    adapter.addLayer(new Probe('front', 10));
+
+    adapter.setInteractive?.(true);
+    expect(adapter.getInteractive?.()).toBe(true);
+    expect(canvas.style.pointerEvents).toBe('auto');
+
+    // Right-click pointerdown at client (105, 57) → canvas-local (100, 50).
+    const ev = new PointerEvent('pointerdown', { clientX: 105, clientY: 57, button: 2 });
+    canvas.dispatchEvent(ev);
+    // topmost (highest zIndex) first
+    expect(order).toEqual(['front', 'back']);
+    expect(seenDown[0]!.x).toBeCloseTo(100, 6);
+    expect(seenDown[0]!.y).toBeCloseTo(50, 6);
+    expect((seenDown[0]!.source as PointerEvent).button).toBe(2);
+
+    // contextmenu is suppressed (preventDefault) so the right-click can be
+    // used to finalize a polygon without the browser menu popping.
+    const menu = new Event('contextmenu', { cancelable: true });
+    canvas.dispatchEvent(menu);
+    expect(menu.defaultPrevented).toBe(true);
+
+    // Turning it off restores pointer-events and stops dispatch.
+    adapter.setInteractive?.(false);
+    expect(canvas.style.pointerEvents).toBe('none');
+    canvas.dispatchEvent(new PointerEvent('pointerdown', { clientX: 105, clientY: 57 }));
+    expect(order).toEqual(['front', 'back']); // unchanged — no new dispatch
+
     adapter.destroy();
   });
 

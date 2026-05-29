@@ -3,6 +3,6 @@ export { HitEntry, HitShape, HitTester } from './core/index.cjs';
 export { C as Chart, a as ChartOptions, b as ChartPadding, I as InteractionOptions, c as attachInteractions } from './Chart-X0iDNcFQ.cjs';
 export { A as AxisLayer, G as GridLayer, L as Layer, a as LayerPointerEvent } from './Layer-B62B76wJ.cjs';
 export { shareAxes, shareXAxis, shareYAxis } from './chart/index.cjs';
-export { A as Adapter } from './Adapter-gFe3x_4d.cjs';
+export { A as Adapter } from './Adapter-BYeFC3gd.cjs';
 export { TradingViewChart, TradingViewLogicalRange, TradingViewOverlayAdapter, TradingViewOverlayAdapterOptions, TradingViewSeries, TradingViewTime, TradingViewTimeRange, TradingViewTimeScale, VanillaChartAdapter } from './adapters/index.cjs';
-export { BollingerBands, BollingerBandsOptions, BollingerSample, Crosshair, CrosshairOptions, Order, OrderMarkers, OrderMarkersOptions, OverlayBase, OverlayOptions, PriceLine, PriceLineOptions, PriceLineSpec, Signal, SignalArrows, SignalArrowsOptions, ThresholdBand, ThresholdBandOptions, ThresholdBandSpec, VWAP, VWAPOptions, VWAPSample, Zone, ZoneBoxes, ZoneBoxesOptions, computeBands, computeVWAP } from './overlays/index.cjs';
+export { BollingerBands, BollingerBandsOptions, BollingerSample, Crosshair, CrosshairOptions, Drawing, DrawingOverlay, DrawingOverlayOptions, DrawingPoint, DrawingStyle, DrawingTool, DrawingType, Order, OrderMarkers, OrderMarkersOptions, OverlayBase, OverlayOptions, PriceLine, PriceLineOptions, PriceLineSpec, Signal, SignalArrows, SignalArrowsOptions, ThresholdBand, ThresholdBandOptions, ThresholdBandSpec, VWAP, VWAPOptions, VWAPSample, Zone, ZoneBoxes, ZoneBoxesOptions, computeBands, computeVWAP } from './overlays/index.cjs';
