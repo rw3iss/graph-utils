@@ -1166,11 +1166,23 @@ var TradingViewTimeScaleAdapter = class {
     return [NaN, NaN];
   }
   scale(value) {
-    const x = this.ts.timeToCoordinate(this.toTime(value));
+    if (!Number.isFinite(value)) return NaN;
+    let x;
+    try {
+      x = this.ts.timeToCoordinate(this.toTime(value));
+    } catch {
+      return NaN;
+    }
     return x === null ? NaN : x;
   }
   invert(pixel) {
-    const t = this.ts.coordinateToTime(pixel);
+    if (!Number.isFinite(pixel)) return NaN;
+    let t;
+    try {
+      t = this.ts.coordinateToTime(pixel);
+    } catch {
+      return NaN;
+    }
     return t === null ? NaN : this.fromTime(t);
   }
   ticks(count) {
@@ -1202,11 +1214,23 @@ var TradingViewPriceScaleAdapter = class {
     return [NaN, NaN];
   }
   scale(price) {
-    const y = this.s.priceToCoordinate(price);
+    if (!Number.isFinite(price)) return NaN;
+    let y;
+    try {
+      y = this.s.priceToCoordinate(price);
+    } catch {
+      return NaN;
+    }
     return y === null ? NaN : y;
   }
   invert(pixel) {
-    const p = this.s.coordinateToPrice(pixel);
+    if (!Number.isFinite(pixel)) return NaN;
+    let p;
+    try {
+      p = this.s.coordinateToPrice(pixel);
+    } catch {
+      return NaN;
+    }
     return p === null ? NaN : p;
   }
   ticks(_count) {
@@ -2001,7 +2025,7 @@ var DrawingOverlay = class extends Layer {
   }
   /** Replace all drawings (persistence restore). Emits 'change'. */
   setDrawings(d) {
-    this.drawings = d.map(cloneDrawing);
+    this.drawings = sanitizeDrawings(d).map(cloneDrawing);
     this.setSelected(null);
     this.clearInProgress();
     this.emitChange();
@@ -2347,6 +2371,7 @@ var DrawingOverlay = class extends Layer {
     if (isRightClick) return;
     const type = this.tool;
     const data = this.toDataSafe(e);
+    if (!Number.isFinite(data.x) || !Number.isFinite(data.y)) return;
     if (this.inProgressType === null) this.inProgressType = type;
     this.inProgress.push({ x: data.x, y: data.y });
     const needed = POINTS_NEEDED[type];
@@ -2506,6 +2531,11 @@ var DrawingOverlay = class extends Layer {
   }
   // -- internals ------------------------------------------------------------
   finalizeShape(type, points, text) {
+    if (!points.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))) {
+      this.clearInProgress();
+      this.adapter.invalidate();
+      return;
+    }
     const d = {
       id: nextId(),
       type,
@@ -2599,6 +2629,12 @@ function approxTextWidth2(text, fontH) {
 }
 function isFinitePt(p) {
   return Number.isFinite(p.x) && Number.isFinite(p.y);
+}
+function sanitizeDrawings(drawings) {
+  if (!Array.isArray(drawings)) return [];
+  return drawings.filter(
+    (d) => !!d && Array.isArray(d.points) && d.points.length > 0 && d.points.every((p) => p != null && Number.isFinite(p.x) && Number.isFinite(p.y))
+  );
 }
 function dist(ax, ay, bx, by) {
   const dx = ax - bx;

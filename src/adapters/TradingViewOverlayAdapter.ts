@@ -144,12 +144,28 @@ class TradingViewTimeScaleAdapter implements Scale {
   }
 
   scale(value: number): number {
-    const x = this.ts.timeToCoordinate(this.toTime(value));
+    // Guard non-finite input and any TV internal throw. A corrupt drawing
+    // point with a null/NaN time reaches `timeToCoordinate(null)`, which reads
+    // `.year` of null deep inside TV and THROWS — that would crash the entire
+    // overlay render loop (every frame: resize, crosshair, setData, interval).
+    if (!Number.isFinite(value)) return NaN;
+    let x: number | null;
+    try {
+      x = this.ts.timeToCoordinate(this.toTime(value));
+    } catch {
+      return NaN;
+    }
     return x === null ? NaN : x;
   }
 
   invert(pixel: number): number {
-    const t = this.ts.coordinateToTime(pixel);
+    if (!Number.isFinite(pixel)) return NaN;
+    let t: TradingViewTime | null;
+    try {
+      t = this.ts.coordinateToTime(pixel);
+    } catch {
+      return NaN;
+    }
     return t === null ? NaN : this.fromTime(t);
   }
 
@@ -188,11 +204,23 @@ class TradingViewPriceScaleAdapter implements Scale {
     return [NaN, NaN];
   }
   scale(price: number): number {
-    const y = this.s.priceToCoordinate(price);
+    if (!Number.isFinite(price)) return NaN;
+    let y: number | null;
+    try {
+      y = this.s.priceToCoordinate(price);
+    } catch {
+      return NaN;
+    }
     return y === null ? NaN : y;
   }
   invert(pixel: number): number {
-    const p = this.s.coordinateToPrice(pixel);
+    if (!Number.isFinite(pixel)) return NaN;
+    let p: number | null;
+    try {
+      p = this.s.coordinateToPrice(pixel);
+    } catch {
+      return NaN;
+    }
     return p === null ? NaN : p;
   }
   ticks(_count: number): number[] {

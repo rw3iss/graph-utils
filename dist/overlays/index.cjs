@@ -615,7 +615,7 @@ var DrawingOverlay = class extends Layer {
   }
   /** Replace all drawings (persistence restore). Emits 'change'. */
   setDrawings(d) {
-    this.drawings = d.map(cloneDrawing);
+    this.drawings = sanitizeDrawings(d).map(cloneDrawing);
     this.setSelected(null);
     this.clearInProgress();
     this.emitChange();
@@ -961,6 +961,7 @@ var DrawingOverlay = class extends Layer {
     if (isRightClick) return;
     const type = this.tool;
     const data = this.toDataSafe(e);
+    if (!Number.isFinite(data.x) || !Number.isFinite(data.y)) return;
     if (this.inProgressType === null) this.inProgressType = type;
     this.inProgress.push({ x: data.x, y: data.y });
     const needed = POINTS_NEEDED[type];
@@ -1120,6 +1121,11 @@ var DrawingOverlay = class extends Layer {
   }
   // -- internals ------------------------------------------------------------
   finalizeShape(type, points, text) {
+    if (!points.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))) {
+      this.clearInProgress();
+      this.adapter.invalidate();
+      return;
+    }
     const d = {
       id: nextId(),
       type,
@@ -1213,6 +1219,12 @@ function approxTextWidth2(text, fontH) {
 }
 function isFinitePt(p) {
   return Number.isFinite(p.x) && Number.isFinite(p.y);
+}
+function sanitizeDrawings(drawings) {
+  if (!Array.isArray(drawings)) return [];
+  return drawings.filter(
+    (d) => !!d && Array.isArray(d.points) && d.points.length > 0 && d.points.every((p) => p != null && Number.isFinite(p.x) && Number.isFinite(p.y))
+  );
 }
 function dist(ax, ay, bx, by) {
   const dx = ax - bx;

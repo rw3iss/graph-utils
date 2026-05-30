@@ -199,7 +199,10 @@ export class DrawingOverlay extends Layer {
 
   /** Replace all drawings (persistence restore). Emits 'change'. */
   setDrawings(d: Drawing[]): void {
-    this.drawings = d.map(cloneDrawing);
+    // Drop corrupt drawings (non-finite coords) on load — older/buggy builds
+    // could persist null/NaN points that crash TV's time conversion on render.
+    // The emitChange below lets the host re-persist the cleaned set (self-heal).
+    this.drawings = sanitizeDrawings(d).map(cloneDrawing);
     this.setSelected(null);
     this.clearInProgress();
     this.emitChange();
@@ -595,6 +598,9 @@ export class DrawingOverlay extends Layer {
 
     const type = this.tool;
     const data = this.toDataSafe(e);
+    // If the click can't be mapped to a finite data point, ignore it rather
+    // than store a NaN/null coord that would later crash rendering.
+    if (!Number.isFinite(data.x) || !Number.isFinite(data.y)) return;
     if (this.inProgressType === null) this.inProgressType = type;
     this.inProgress.push({ x: data.x, y: data.y });
 
@@ -780,6 +786,12 @@ export class DrawingOverlay extends Layer {
   // -- internals ------------------------------------------------------------
 
   private finalizeShape(type: DrawingType, points: DrawingPoint[], text?: string): void {
+    // Never persist a shape with a non-finite coordinate (defense in depth).
+    if (!points.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))) {
+      this.clearInProgress();
+      this.adapter.invalidate();
+      return;
+    }
     const d: Drawing = {
       id: nextId(),
       type,
@@ -914,6 +926,20 @@ function approxTextWidth(text: string, fontH: number): number {
 
 function isFinitePt(p: { x: number; y: number }): boolean {
   return Number.isFinite(p.x) && Number.isFinite(p.y);
+}
+
+/** Drop corrupt drawings: missing/empty points, or any point with a non-finite
+ *  x/y. Such data (persisted by older builds) makes TV's time conversion throw
+ *  on render, so it's filtered on load. */
+function sanitizeDrawings(drawings: Drawing[]): Drawing[] {
+  if (!Array.isArray(drawings)) return [];
+  return drawings.filter(
+    (d) =>
+      !!d &&
+      Array.isArray(d.points) &&
+      d.points.length > 0 &&
+      d.points.every((p) => p != null && Number.isFinite(p.x) && Number.isFinite(p.y)),
+  );
 }
 
 function dist(ax: number, ay: number, bx: number, by: number): number {

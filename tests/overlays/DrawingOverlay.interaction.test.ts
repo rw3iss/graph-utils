@@ -61,4 +61,31 @@ describe('DrawingOverlay interaction fixes', () => {
     d.draw(ctx, {} as any);
     expect(calls.filter((c) => c.n === 'circle').length).toBeGreaterThanOrEqual(2);
   });
+
+  it('drops corrupt drawings (null/NaN coords) on load — the TV "year of null" crash', () => {
+    const d = new DrawingOverlay(adapter(), {});
+    d.setDrawings([
+      { id: 'ok', type: 'line', points: [{ x: 1000, y: 1 }, { x: 2000, y: 2 }] },
+      { id: 'bad-null', type: 'line', points: [{ x: null as any, y: 1 }, { x: 2000, y: 2 }] },
+      { id: 'bad-nan', type: 'hline', points: [{ x: NaN, y: NaN }] },
+      { id: 'bad-empty', type: 'line', points: [] },
+    ]);
+    expect(d.getDrawings().map((x) => x.id)).toEqual(['ok']);
+  });
+
+  it('ignores a click that cannot be mapped to a finite data point', () => {
+    // toData returns NaN and there is no usable domain/width to snap to.
+    const a = {
+      getCanvas: () => ({ getBoundingClientRect: () => ({ left: 0, top: 0, width: 0, height: 0 }), width: 0 }),
+      getViewport: () => ({ xDomain: [NaN, NaN] as [number, number], yDomain: [NaN, NaN] as [number, number] }),
+      addLayer() {}, removeLayer() {}, invalidate() {}, setInteractive() {}, getInteractive() { return false; },
+      toPixel: (x: number, y: number) => ({ x, y }),
+      toData: () => ({ x: NaN, y: NaN }),
+    } as any;
+    const d = new DrawingOverlay(a, {});
+    d.setTool('line');
+    d.onPointerDown!(down(100, 100));
+    d.onPointerDown!(down(200, 150));
+    expect(d.getDrawings().length).toBe(0);
+  });
 });

@@ -407,11 +407,23 @@ var TradingViewTimeScaleAdapter = class {
     return [NaN, NaN];
   }
   scale(value) {
-    const x = this.ts.timeToCoordinate(this.toTime(value));
+    if (!Number.isFinite(value)) return NaN;
+    let x;
+    try {
+      x = this.ts.timeToCoordinate(this.toTime(value));
+    } catch {
+      return NaN;
+    }
     return x === null ? NaN : x;
   }
   invert(pixel) {
-    const t = this.ts.coordinateToTime(pixel);
+    if (!Number.isFinite(pixel)) return NaN;
+    let t;
+    try {
+      t = this.ts.coordinateToTime(pixel);
+    } catch {
+      return NaN;
+    }
     return t === null ? NaN : this.fromTime(t);
   }
   ticks(count) {
@@ -443,11 +455,23 @@ var TradingViewPriceScaleAdapter = class {
     return [NaN, NaN];
   }
   scale(price) {
-    const y = this.s.priceToCoordinate(price);
+    if (!Number.isFinite(price)) return NaN;
+    let y;
+    try {
+      y = this.s.priceToCoordinate(price);
+    } catch {
+      return NaN;
+    }
     return y === null ? NaN : y;
   }
   invert(pixel) {
-    const p = this.s.coordinateToPrice(pixel);
+    if (!Number.isFinite(pixel)) return NaN;
+    let p;
+    try {
+      p = this.s.coordinateToPrice(pixel);
+    } catch {
+      return NaN;
+    }
     return p === null ? NaN : p;
   }
   ticks(_count) {
